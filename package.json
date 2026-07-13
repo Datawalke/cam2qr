@@ -76,7 +76,11 @@
       "optional": true
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "prepublishOnly": "pnpm run ci",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src test demo",
