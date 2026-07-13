@@ -1,7 +1,6 @@
 {
   "name": "cam2qr",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.0",
   "description": "Zero-dependency TypeScript QR code scanning for the browser — independent from-spec detection and decoding, camera included.",
   "license": "MIT",
   "author": "Datawalke",
