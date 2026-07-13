@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>cam2qr browser test</title>
+<video id="video"></video>
+<script>
+  // Count worker instantiations so the test can assert the worker path ran.
+  window.__workerCount = 0;
+  const NativeWorker = window.Worker;
+  window.Worker = class extends NativeWorker {
+    constructor(...args) {
+      super(...args);
+      window.__workerCount++;
+    }
+  };
+</script>
+<script type="module">
+  import { QrScanner } from '/dist/index.js';
+
+  const scanner = new QrScanner(document.getElementById('video'), {
+    onDecode(result) {
+      window.__scanResult = {
+        text: result.text,
+        version: result.version,
+        cornerPoints: result.cornerPoints,
+        moduleSize: result.moduleSize,
+      };
+      scanner.stop();
+    },
+    onError(error) {
+      window.__scanError = `${error.code}: ${error.message}`;
+    },
+  });
+  window.__scanner = scanner;
+  scanner.start().catch((error) => {
+    window.__scanError = `${error.code ?? 'start'}: ${error.message ?? error}`;
+  });
+</script>

@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="How cam2qr reads a QR code: a from-scratch TypeScript decoder explained stage by stage, from adaptive binarization and finder patterns to homography, BCH format codes, Reed–Solomon, and segment decoding." />
+<title>How it works · cam2qr</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7'><rect width='7' height='7' fill='%23191914'/><rect x='1' y='1' width='5' height='5' fill='%23f7f6f2'/><rect x='2' y='2' width='3' height='3' fill='%23d6402f'/></svg>" />
+<link rel="stylesheet" href="site.css" />
+</head>
+<body class="docs">
+
+<nav>
+  <div class="wrap nav-inner">
+    <a class="wordmark" href="index.html" aria-label="cam2qr home">
+      <svg width="18" height="18" viewBox="0 0 7 7" aria-hidden="true">
+        <rect x="0" y="0" width="7" height="7" fill="var(--ink)"/>
+        <rect x="1" y="1" width="5" height="5" fill="var(--bg)"/>
+        <rect x="2" y="2" width="3" height="3" fill="var(--accent)"/>
+      </svg>
+      cam2qr
+    </a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="docs.html">Docs</a>
+      <a href="how-it-works.html" aria-current="page">How it works</a>
+      <a href="https://github.com/Datawalke/cam2qr">GitHub</a>
+    </div>
+    <button id="theme-toggle" aria-label="Toggle color theme">theme</button>
+  </div>
+</nav>
+
+<main class="wrap wide">
+<div class="deep-dive">
+<article class="article">
+
+<header class="page-head">
+  <p class="eyebrow">The deep dive</p>
+  <h1>How a camera frame becomes a URL<span style="color:var(--accent)">.</span></h1>
+  <p class="sub">cam2qr's entire pipeline is implemented from the ISO/IEC&nbsp;18004
+  specification, with no ported decoder hiding underneath. That makes it explainable end
+  to end. So here is the whole journey, one stage at a time, with the actual file named
+  beside each heading so you can read along in
+  <a href="https://github.com/Datawalke/cam2qr">the source</a>. Each figure is a
+  small looping simulation of its stage; they hold still if your system asks for
+  reduced motion. On a wide screen, the matching source excerpt rides along beside
+  each stage. It is extracted from the repository when the site is generated, so
+  the code you read here is the code that ships.</p>
+</header>
+
+<section data-snippet="grayscale">
+  <h2><span class="num">01</span>Grayscale</h2>
+  <p class="ref">src/detect/grayscale.ts</p>
+  <canvas class="viz" width="340" height="130" data-viz="grayscale"
+    aria-label="Animation: a sweep line converts a grid of colored pixels to their gray luminance values"></canvas>
+  <p>A camera frame arrives as RGBA bytes. QR codes carry no color information, so the
+  first move is to collapse each pixel to its brightness using the classic BT.601 weights:
+  <code>0.299·R + 0.587·G + 0.114·B</code>, computed in integer arithmetic as
+  <code>(77·R + 150·G + 29·B) &gt;&gt; 8</code>. One pass, one byte per pixel. Every
+  later stage now works on a quarter of the data.</p>
+</section>
+
+<section data-snippet="binarize">
+  <h2><span class="num">02</span>Adaptive binarization</h2>
+  <p class="ref">src/detect/binarizer.ts</p>
+  <canvas class="viz" width="340" height="130" data-viz="binarize"
+    aria-label="Animation: a sliding window sweeps a gradient-lit texture, leaving clean black and white behind it"></canvas>
+  <p>Deciding which pixels count as "dark" is where real-world photos go to die. A single
+  global threshold fails the moment lighting varies across the frame. One half of the
+  symbol sits in glare, the other in shadow, and no single cutoff separates both.</p>
+  <p>So every pixel is judged against its <em>surroundings</em>: a square window about a
+  tenth of the frame wide. The window's mean brightness comes from a summed-area table
+  built once per frame, which makes it four lookups no matter how big the window is. A
+  pixel counts as dark when it sits clearly below its window's mean. That alone would
+  hollow out ink regions larger than the window (their interior <em>is</em> the local
+  mean), so a second cut keeps anything far below the global Otsu threshold, the classic
+  histogram split, dark as well. Frames too small for meaningful windows use Otsu alone.</p>
+  <p class="aside">The output is a packed bit image. The <code>tryInverted</code> option
+  (on by default) simply flips it and runs detection again. That is the whole cost of
+  supporting light-on-dark codes.</p>
+</section>
+
+<section data-snippet="finder-profile">
+  <h2><span class="num">03</span>Finding the finder patterns</h2>
+  <p class="ref">src/detect/finder.ts · spec §7.3.2</p>
+  <canvas class="viz" width="340" height="130" data-viz="finder"
+    aria-label="Animation: a scan line sweeps the square finder pattern; rows through the center read the ratio 1:1:3:1:1 and lock the center"></canvas>
+  <p>The three big squares in a QR code's corners are engineered to be findable: any
+  straight line through a finder pattern's center crosses dark, light, dark, light, dark
+  runs in the ratio <code>1:1:3:1:1</code>, whatever the symbol's rotation or size.
+  That one property is the entire location strategy.</p>
+  <p>Every row of the bit image is run-length encoded, and each five-run window is tested
+  against the ratio, allowing a summed deviation of up to a quarter of the window's width.
+  A row hit is only a <em>candidate</em>. It gets cross-checked by walking the same ratio
+  vertically through the proposed center, which also refines the center estimate. A
+  single noise pixel on the exact center column would veto an otherwise perfect pattern,
+  so failed walks retry up to two pixels to either side before giving up.</p>
+  <p>Confirmed centers from many rows are clustered. Repeated confirmation raises a
+  pattern's <code>count</code>, which later serves as a confidence signal. There is
+  deliberately no diagonal cross-check (a common extra filter): one bad pixel on the
+  diagonal would veto a well-confirmed center, and the geometry scoring in the next stage
+  filters false positives more robustly.</p>
+</section>
+
+<section data-snippet="triple-score">
+  <h2><span class="num">04</span>Choosing the triple</h2>
+  <p class="ref">src/detect/finder.ts · rankTriples</p>
+  <canvas class="viz" width="340" height="130" data-viz="triple"
+    aria-label="Animation: candidate triangles between finder-like blobs are tried and rejected until the right isosceles corner layout locks"></canvas>
+  <p>A frame may hold more finder-like blobs than the three we need: decoys in busy
+  backgrounds, or six and more real patterns when several codes share the frame. Every
+  combination of three candidates is scored against the right-isosceles corner layout of
+  a real symbol. Module sizes must agree (a spread beyond half the mean rejects the
+  triple outright). The two legs must be similar in length, and long enough that the
+  patterns don't overlap. The diagonal must be close to <code>√2</code> legs, and the
+  corner angle close to 90°.</p>
+  <p>The best-scoring triple is then ordered geometrically: the corner opposite the longest
+  side is top-left, and the sign of a cross product tells top-right from bottom-left.
+  That is how a code scans identically at any rotation. Lower-ranked triples are not
+  thrown away. <code>tryHarder</code> iterates through them so a decoy cannot mask the
+  real symbol, and <code>decodeAll()</code> walks them all, retiring each pattern as its
+  symbol decodes. That is how several codes per frame partition cleanly.</p>
+</section>
+
+<section data-snippet="module-size">
+  <h2><span class="num">05</span>Module size, version, and the alignment pattern</h2>
+  <p class="ref">src/detect/detector.ts · src/detect/alignment.ts · spec §7.3.5</p>
+  <canvas class="viz" width="340" height="130" data-viz="modulesize"
+    aria-label="Animation: a ray walks from one finder center toward another, ticking off the dark-light transitions at 1.5, 2.5 and 3.5 modules"></canvas>
+  <p>How many modules wide is this symbol? The finder's edge profile is measured from
+  each center along the actual directions toward the other finders. The core→ring→rim
+  transitions sit at exactly 1.5, 2.5, and 3.5 modules, and measuring along the pattern's
+  own axes keeps the estimate honest under rotation, where a horizontal ruler would
+  over-read by 1/cos&nbsp;θ. Dividing center distances by the module size gives a
+  provisional dimension, snapped to the only values the spec allows
+  (<code>4k+17</code>, i.e. 21…177 modules). Estimates that snap badly reject the triple.</p>
+  <p>Symbols of version 2 and up embed a small <code>1:1:1:1:1</code> alignment pattern
+  near the bottom-right corner. Its expected position is predicted from the finder
+  parallelogram, then searched for in the bit image. Found, it becomes the fourth anchor
+  that captures perspective tilt. Not found (hidden under a thumb, say), the
+  parallelogram's completed fourth corner stands in: less accurate, still usually
+  decodable.</p>
+</section>
+
+<section data-snippet="homography">
+  <h2><span class="num">06</span>The homography</h2>
+  <p class="ref">src/detect/perspective.ts</p>
+  <canvas class="viz" width="340" height="130" data-viz="warp"
+    aria-label="Animation: a perspective-skewed grid straightens into a square, anchored by four highlighted correspondence points"></canvas>
+  <p>A phone never looks at a poster straight-on. The mapping between the tilted symbol
+  in the photo and its ideal square grid is a plane projective transform: a 3×3
+  homography, the same math that texture-maps a quad in graphics. Four point pairs pin it
+  down: three finder centers plus the alignment pattern (or the completed parallelogram
+  corner).</p>
+  <p>cam2qr computes it the textbook way. The four correspondences linearize into eight
+  equations in the homography's eight unknowns, solved by Gaussian elimination with
+  partial pivoting. And then it never warps the image. Instead, the transform runs
+  <em>backwards</em>: for each module of the ideal grid, project its center into the
+  photo and read one pixel. Sampling beats warping on both speed and accuracy. There are
+  no resampling artifacts, and the cost scales with the symbol's module count, not its
+  pixel area.</p>
+</section>
+
+<section data-snippet="sample-grid">
+  <h2><span class="num">07</span>Sampling the grid</h2>
+  <p class="ref">src/detect/detector.ts · sampleModules</p>
+  <canvas class="viz" width="340" height="130" data-viz="sample"
+    aria-label="Animation: sample points sweep the module centers of a QR grid while the bit matrix fills in beside it"></canvas>
+  <p>One projected read per module center (offset +0.5 to hit centers, not corners) turns
+  the photo into an exact N×N bit matrix. Sub-pixel overshoot at the outermost ring of
+  modules is clamped to the image edge. Anything worse means the geometry was wrong, and
+  the triple is rejected rather than decoded into garbage. From here on there are no
+  pixels. Only bits.</p>
+</section>
+
+<section data-snippet="format-info">
+  <h2><span class="num">08</span>Format information: the 15 most protected bits</h2>
+  <p class="ref">src/core/format.ts · src/core/bch.ts · spec §8.9</p>
+  <canvas class="viz" width="340" height="130" data-viz="format"
+    aria-label="Animation: three of the fifteen format bits get flipped and the BCH code snaps them back"></canvas>
+  <p>Before the payload can be read, the decoder must learn two things the encoder chose:
+  the error-correction level, and which of eight mask patterns was applied. These five
+  bits ride in a 15-bit field protected by a BCH(15,5) code that survives up to three
+  flipped bits. They have to be bulletproof, because misreading them corrupts
+  <em>everything</em> downstream. The field is XOR'd with a fixed pattern (so an all-zero
+  choice never produces an all-blank field) and written twice around the finder patterns.
+  cam2qr decodes the two copies jointly, scoring every candidate against the
+  better-preserved reading, so one copy mangled toward a <em>different</em> valid codeword
+  can never shadow a clean one. Versions 7 and up also carry an 18-bit BCH(18,6) version
+  field in two copies, decoded the same way and cross-checked against stage 05's size
+  estimate. A legible disagreement rejects the fit rather than decoding garbage.</p>
+</section>
+
+<section data-snippet="mask">
+  <h2><span class="num">09</span>Unmasking</h2>
+  <p class="ref">src/core/mask.ts · spec §8.8.1</p>
+  <canvas class="viz" width="340" height="130" data-viz="masks"
+    aria-label="Animation: one grid cycling through all eight mask formulas with each formula shown beside it"></canvas>
+  <p>Encoders XOR the data region with one of eight checkerboard-like formulas, chosen
+  to break up solid areas and accidental finder-lookalikes that would confuse scanners.
+  Each formula is a one-line predicate over the module's coordinates
+  (<code>(i+j)&nbsp;%&nbsp;2&nbsp;===&nbsp;0</code> is mask 000). Decoding is simply
+  applying the announced formula again, because XOR is its own inverse. Function patterns
+  (finders, timing lines, alignment, the format field itself) are never masked, so the
+  unmasker walks the data region only.</p>
+</section>
+
+<section data-snippet="zigzag">
+  <h2><span class="num">10</span>The zigzag walk and de-interleaving</h2>
+  <p class="ref">src/core/codewords.ts · spec §8.7.3</p>
+  <canvas class="viz" width="340" height="130" data-viz="zigzag"
+    aria-label="Animation: the two-column serpentine path traces itself through the grid, grouping every eight bits into a codeword"></canvas>
+  <p>Data bits live along a serpentine path. Starting at the bottom-right corner, the
+  reader climbs a two-module-wide column upward, steps left, descends the next pair, and
+  so on, detouring around every function pattern it meets. Eight bits at a time become
+  codewords.</p>
+  <p>Those codewords are not in payload order. Larger symbols split their data into
+  multiple error-correction blocks and <em>interleave</em> them codeword by codeword, so
+  a coffee stain wipes out a little of every block instead of all of one. The decoder
+  reverses the interleave using the block structure table for this version and EC
+  level.</p>
+</section>
+
+<section data-snippet="reed-solomon">
+  <h2><span class="num">11</span>Reed–Solomon error correction</h2>
+  <p class="ref">src/core/reed-solomon.ts · src/core/gf256.ts · spec §8.5</p>
+  <canvas class="viz" width="340" height="130" data-viz="correct"
+    aria-label="Animation: two damaged codewords are flagged, a search cursor locates them, and they snap back repaired"></canvas>
+  <p>This is the stage that makes QR codes work in the real world: up to roughly 30% of a
+  symbol (at level H) can be wrong, and the payload still comes back exact. Every block
+  is a Reed–Solomon codeword over GF(256), an arithmetic where bytes are polynomials
+  modulo the primitive polynomial <code>0x11D</code>, built once into log/antilog tables
+  so that multiplying is two lookups.</p>
+  <p>Decoding runs the textbook sequence. Compute <em>syndromes</em> (all zero means the
+  block is clean, the common fast path). Run <em>Berlekamp–Massey</em> over the syndromes
+  to build the shortest error-locator polynomial Λ that explains them. Find Λ's roots by
+  <em>Chien search</em>; each root names a damaged byte position. Compute each error's
+  magnitude with <em>Forney's formula</em>, and XOR the fixes in. If more positions are
+  damaged than the block can correct, the math fails loudly and the decode is rejected.
+  Never silently wrong. The number of corrected codewords rides on every result as
+  <code>ecc.codewordsCorrected</code>: a free damage gauge.</p>
+</section>
+
+<section data-snippet="segments">
+  <h2><span class="num">12</span>Segments: bits become text</h2>
+  <p class="ref">src/core/segments.ts · spec §8.4</p>
+  <canvas class="viz" width="340" height="130" data-viz="segments"
+    aria-label="Animation: a bitstream types itself out, its byte-mode header is tagged, and the decoded text https://cam2qr.com appears"></canvas>
+  <p>The corrected bytes are a bitstream of mode-tagged segments, each squeezing its
+  character class close to its information-theoretic floor. <em>Numeric</em> packs three
+  digits into 10 bits. <em>Alphanumeric</em> packs two characters into 11. <em>Byte</em>
+  is raw octets, decoded as strict UTF-8 with an ISO-8859-1 fallback (the de-facto
+  standard). <em>Kanji</em> packs a Shift-JIS pair into 13 bits. And <em>ECI</em>
+  switches the charset for whatever follows, using the AIM assignment table.</p>
+  <p>Three header-like modes round out the spec. <em>FNC1</em> marks GS1 data (where
+  <code>%</code> in alphanumeric text is an escape for the GS separator).
+  <em>Structured&nbsp;Append</em> declares "this is symbol i of N" so the scanner can
+  reassemble split payloads, parity-checked before anything is emitted. And the
+  terminator ends the stream. Finally the decoded text is classified into
+  <code>result.content</code>: URL, WiFi credentials, vCard, GS1 element strings, geo,
+  tel, SMS, email.</p>
+</section>
+
+<section data-snippet="pass-plan">
+  <h2><span class="num">13</span>Why it survives bad frames</h2>
+  <p class="ref">src/decode.ts · the pass plan</p>
+  <canvas class="viz" width="340" height="130" data-viz="passes"
+    aria-label="Animation: three decode passes are tried in order (downscaled, full resolution, inverted) and the third succeeds"></canvas>
+  <p>Wrapped around the pipeline is a small amount of strategy. Huge frames get a
+  downscaled pass first. It is cheaper, and the averaging doubles as a low-pass filter
+  that often reads <em>blurry</em> codes better than full resolution does; full
+  resolution still runs when it fails. The inverted image is tried when the normal one
+  yields nothing. <code>tryHarder</code> widens the finder-triple search and adds a 2×
+  pass for oversampled codes. Each trick is a retry, not a redesign. The pipeline itself
+  never changes, which is what keeps <code>decode()</code> under 10&nbsp;kB brotli
+  (13.4&nbsp;kB with the whole camera scanner) and half a millisecond on a clean
+  frame.</p>
+  <p class="aside">Numbers to back that up, including head-to-head detection rates
+  against jsQR and @zxing/library, live in the
+  <a href="index.html#benchmarks">benchmarks section</a> and regenerate from
+  <code>pnpm compare</code>.</p>
+
+  <div class="next-prev">
+    <a class="btn primary" href="docs.html">Read the API docs</a>
+    <a class="btn" href="https://github.com/Datawalke/cam2qr">Browse the source</a>
+  </div>
+</section>
+
+</article>
+<aside class="code-rail" aria-label="Source excerpt for the current stage"></aside>
+</div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 Datawalke</span>
+    <a href="index.html">Home</a>
+    <a href="docs.html">Docs</a>
+    <a href="https://github.com/Datawalke/cam2qr">GitHub</a>
+    <span class="spacer"></span>
+    <span>MIT licensed · built from ISO/IEC 18004</span>
+  </div>
+</footer>
+
+<script src="snippets.js"></script>
+<script src="code-rail.js"></script>
+<script src="site.js"></script>
+<script src="viz.js"></script>
+</body>
+</html>

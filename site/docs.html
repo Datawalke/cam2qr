@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="cam2qr documentation: live camera scanning, one-shot decoding, overlays, multi-code, structured append, GS1/Kanji payloads, and the React/Vue/Svelte adapters." />
+<title>Docs · cam2qr</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7'><rect width='7' height='7' fill='%23191914'/><rect x='1' y='1' width='5' height='5' fill='%23f7f6f2'/><rect x='2' y='2' width='3' height='3' fill='%23d6402f'/></svg>" />
+<link rel="stylesheet" href="site.css" />
+</head>
+<body class="docs">
+
+<nav>
+  <div class="wrap nav-inner">
+    <a class="wordmark" href="index.html" aria-label="cam2qr home">
+      <svg width="18" height="18" viewBox="0 0 7 7" aria-hidden="true">
+        <rect x="0" y="0" width="7" height="7" fill="var(--ink)"/>
+        <rect x="1" y="1" width="5" height="5" fill="var(--bg)"/>
+        <rect x="2" y="2" width="3" height="3" fill="var(--accent)"/>
+      </svg>
+      cam2qr
+    </a>
+    <div class="nav-links">
+      <a href="#scanning">Scanning</a>
+      <a href="#overlays">Overlays</a>
+      <a href="#oneshot">decode()</a>
+      <a href="#results">Results</a>
+      <a href="#payloads">Payloads</a>
+      <a href="#adapters">Adapters</a>
+      <a href="#performance">Performance</a>
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="https://github.com/Datawalke/cam2qr">GitHub</a>
+    </div>
+    <button id="theme-toggle" aria-label="Toggle color theme">theme</button>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<header class="page-head">
+  <p class="eyebrow">Documentation</p>
+  <h1>Everything the scanner does<span style="color:var(--accent)">.</span></h1>
+  <p class="sub">Three layers, each happy to work alone: a pure <code>decode()</code>
+  function over pixels, a batteries-included <code>QrScanner</code> for live camera work,
+  and framework adapters that wrap it. This page is the full reference. The
+  <a href="how-it-works.html">deep dive</a> explains what happens inside.</p>
+</header>
+
+<section id="install">
+  <p class="eyebrow">Install</p>
+  <h2>One package, five entry points.</h2>
+  <pre class="code" data-lang="ts">
+// npm install cam2qr
+
+import { decode, decodeAll, detect, QrScanner, listCameras } from 'cam2qr';
+import { useQrScanner } from 'cam2qr/react';    // optional peer: react >= 18
+import { useQrScanner } from 'cam2qr/vue';      // optional peer: vue >= 3.2
+import { createQrScanner } from 'cam2qr/svelte'; // optional peer: svelte >= 3.55
+</pre>
+  <p class="lede">The builds are ESM-first with CJS fallbacks, <code>sideEffects: false</code>,
+  and strictly typed. The worker that handles off-main-thread decoding ships as
+  <code>cam2qr/worker</code>, and bundlers that understand
+  <code>new&nbsp;Worker(new&nbsp;URL(…))</code> (Vite, webpack, Rollup…) pick it up on
+  their own.</p>
+</section>
+
+<section id="scanning">
+  <p class="eyebrow">Live scanning</p>
+  <h2><code>new QrScanner(video, options)</code></h2>
+  <pre class="code" data-lang="ts">
+import { QrScanner } from 'cam2qr';
+
+const scanner = new QrScanner(videoElement, {
+  camera: { facing: 'environment' },
+  onDecode(result) { console.log(result.text, result.content); },
+  onDetect(detections) { drawOutlines(detections); },
+  onError(error) { if (error.code === 'permission-denied') showHelp(); },
+});
+
+await scanner.start();
+</pre>
+
+  <h3>Options</h3>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Option</th><th>Default</th><th>What it controls</th></tr></thead>
+      <tbody>
+        <tr><td class="def">camera.facing</td><td class="def">'environment'</td><td>Rear (<code>'environment'</code>) or front (<code>'user'</code>) camera.</td></tr>
+        <tr><td class="def">camera.deviceId</td><td class="def">—</td><td>Pin an exact camera from <code>listCameras()</code>; overrides <code>facing</code>.</td></tr>
+        <tr><td class="def">camera.resolution</td><td class="def">1280×720</td><td>Ideal capture resolution constraints.</td></tr>
+        <tr><td class="def">maxScansPerSecond</td><td class="def">15</td><td>Decode attempts per second: the battery and CPU dial.</td></tr>
+        <tr><td class="def">scanRegion</td><td class="def">full frame</td><td>A sub-rectangle (or <code>video =&gt; region</code>) to decode. A big CPU saver for viewfinder UIs; corner points map back to full-video coordinates.</td></tr>
+        <tr><td class="def">useWorker</td><td class="def">true</td><td>Decode in a module Web Worker, with automatic main-thread fallback.</td></tr>
+        <tr><td class="def">useNativeDetector</td><td class="def">false</td><td>Use the browser's <code>BarcodeDetector</code> where present, with a permanent fallback to our engine when it is missing or failing. Native results carry placeholder codec metadata (<code>version: 0</code>, <code>mask: -1</code>, zero <code>ecc</code>). Fixed at <code>start()</code>.</td></tr>
+        <tr><td class="def">pauseOnHidden</td><td class="def">true</td><td>Pause while the tab is hidden; resume on visibility.</td></tr>
+        <tr><td class="def">tryInverted</td><td class="def">true</td><td>Also look for light-on-dark symbols. Cheap.</td></tr>
+        <tr><td class="def">tryHarder</td><td class="def">false</td><td>Extra passes: more finder-triple candidates, plus a 2× low-pass for blurry codes.</td></tr>
+        <tr><td class="def">maxDownscale</td><td class="def">2</td><td>Downscale huge frames by up to this factor before decoding. Full resolution is still tried when the fast pass fails.</td></tr>
+        <tr><td class="def">dedupeWindowMs</td><td class="def">1500</td><td>Quiet period before the same payload fires again (<code>0</code> = every frame). Tracked per payload, so several visible codes dedupe independently.</td></tr>
+        <tr><td class="def">stopOnDecode</td><td class="def">false</td><td>One-shot mode: release the camera after the first result.</td></tr>
+        <tr><td class="def">multiple</td><td class="def">false</td><td>Decode every code in the frame; each symbol fires its own <code>decode</code> event.</td></tr>
+        <tr><td class="def">structuredAppend</td><td class="def">'reassemble'</td><td>Join multi-symbol sequences into one parity-checked decode event, or <code>'individual'</code> to fire each part. See <a href="#payloads">payload semantics</a>.</td></tr>
+        <tr><td class="def">onDecode / onDetect / onError</td><td class="def">—</td><td>Callbacks. <code>scanner.on(event, fn)</code> / <code>off()</code> work too.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Instance methods</h3>
+  <ul class="method-list">
+    <li><code>await start()</code>: asks for permission, attaches the stream, and begins scanning. Rejects with a typed <code>CameraError</code>.</li>
+    <li><code>stop()</code>: stops scanning and releases the camera. <code>pause()</code> / <code>resume()</code> keep the stream alive.</li>
+    <li><code>destroy()</code>: full teardown (worker, listeners). The instance cannot be reused.</li>
+    <li><code>await setCamera({ facing | deviceId })</code>: hot-switches cameras mid-scan.</li>
+    <li><code>await setTorch(on)</code> / <code>await setZoom(level)</code>: resolve <code>false</code> when unsupported. They never throw.</li>
+    <li><code>getCapabilities()</code>: <code>{ torch: boolean, zoom: { min, max, step } | null }</code> for the active track.</li>
+    <li><code>update(options)</code>: live-tunes <code>maxScansPerSecond</code>, <code>scanRegion</code>, <code>tryInverted</code>, <code>tryHarder</code>, <code>maxDownscale</code>, <code>dedupeWindowMs</code>, <code>stopOnDecode</code>, <code>multiple</code>, <code>structuredAppend</code> without restarting the camera.</li>
+    <li><code>on(event, fn)</code> / <code>off(event, fn)</code>: the events are <code>decode</code>, <code>detect</code>, <code>error</code>, <code>start</code>, <code>stop</code>.</li>
+    <li><code>listCameras()</code> (a standalone export): returns <code>{ id, label, facing }[]</code>. Labels fill in after permission is granted.</li>
+  </ul>
+
+  <h3>Camera errors</h3>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>error.code</th><th>Meaning</th><th>Typical response</th></tr></thead>
+      <tbody>
+        <tr><td class="def">permission-denied</td><td>The user (or a policy) blocked camera access.</td><td>Show how to re-enable; offer file upload plus <code>decode()</code>.</td></tr>
+        <tr><td class="def">camera-not-found</td><td>No camera matches the constraints.</td><td>Relax <code>facing</code>/<code>deviceId</code>; list devices.</td></tr>
+        <tr><td class="def">camera-in-use</td><td>Another app or tab holds the device.</td><td>Ask the user to close it, then retry.</td></tr>
+        <tr><td class="def">insecure-context</td><td>The camera needs HTTPS (or localhost).</td><td>Serve over HTTPS.</td></tr>
+        <tr><td class="def">unsupported</td><td>No <code>getUserMedia</code> in this browser.</td><td>Fall back to file upload plus <code>decode()</code>.</td></tr>
+        <tr><td class="def">stream-failed</td><td>The stream started but broke (device unplugged…).</td><td>Restart or re-enumerate.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="overlays">
+  <p class="eyebrow">Live overlays</p>
+  <h2>The <code>detect</code> event: corner points before the decode.</h2>
+  <p class="lede">Fires on every scanned frame with the located symbol candidates as
+  <code>Detection[]</code> (<code>{ cornerPoints, moduleSize }</code>) in video pixel
+  coordinates, or <code>null</code> when the frame has none. Candidates arrive even while
+  the symbol is still too blurred or far away to decode, which is what makes a live
+  viewfinder outline feel locked on.</p>
+  <pre class="code" data-lang="ts">
+// A canvas sized to the video's pixel grid and CSS-stretched exactly like it
+// can draw video coordinates directly:
+overlay.width = video.videoWidth;
+overlay.height = video.videoHeight;
+
+const scanner = new QrScanner(video, {
+  onDetect(detections) {
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    for (const d of detections ?? []) strokePolygon(ctx, d.cornerPoints);
+  },
+  onDecode(result) {
+    flashPolygon(ctx, result.cornerPoints); // confirmed decode
+  },
+});
+</pre>
+  <p>For DOM overlays positioned in CSS pixels, <code>videoToElementCoordinates(points,
+  video)</code> maps video coordinates through the element's <code>object-fit</code>
+  letterboxing and cropping (it assumes the default centered <code>object-position</code>).</p>
+</section>
+
+<section id="oneshot">
+  <p class="eyebrow">One-shot API</p>
+  <h2><code>decode</code> · <code>decodeAll</code> · <code>detect</code></h2>
+  <p class="lede">Pure functions over any <code>{ data, width, height }</code> RGBA buffer:
+  a canvas <code>ImageData</code>, a decoded PNG in Node, a video frame you grabbed
+  yourself. No DOM, no camera. This is the layer everything else is built on.</p>
+  <pre class="code" data-lang="ts">
+import { decode, decodeAll, detect } from 'cam2qr';
+
+const result = decode(imageData, { tryHarder: true });
+// QrResult | null; null means "no decodable code", never an exception
+
+const results = decodeAll(imageData);
+// QrResult[]: every symbol in the frame, deduplicated across passes;
+// always runs the full pass plan (scales + inverted), so it can find a
+// dark-on-light and a light-on-dark code together
+
+const candidates = detect(imageData, { maxCandidates: 4 });
+// Detection[]: plausibility-ranked corner points, no decoding at all;
+// may include finder-like decoys that would not survive a decode
+</pre>
+  <p><code>decode()</code> and <code>decodeAll()</code> accept <code>tryInverted</code>,
+  <code>tryHarder</code>, <code>maxDownscale</code>, and <code>parseContent</code>;
+  <code>detect()</code> accepts <code>tryInverted</code>, <code>maxDownscale</code>, and
+  <code>maxCandidates</code>. All three throw only on malformed input dimensions.</p>
+</section>
+
+<section id="results">
+  <p class="eyebrow">Results</p>
+  <h2>Every result carries its evidence.</h2>
+  <pre class="code" data-lang="ts">
+interface QrResult {
+  text: string;                     // decoded, charset-aware (ECI/UTF-8/Shift-JIS)
+  bytes: Uint8Array;                // raw payload bytes
+  content?: ParsedContent;          // url | wifi | vcard | geo | tel | sms | email | gs1 | text
+  cornerPoints: [Point, Point, Point, Point]; // symbol outline, for overlays
+  moduleSize: number;               // pixels per module, a distance/quality proxy
+  version: number;                  // 1–40
+  errorCorrectionLevel: 'L' | 'M' | 'Q' | 'H';
+  mask: number;                     // 0–7
+  segments: Segment[];              // per-mode payload breakdown (incl. kanji)
+  ecc: { blocks: number; codewordsCorrected: number }; // how damaged was it?
+  structuredAppend?: { index: number; total: number; parity: number };
+  fnc1?: { position: 'first' } | { position: 'second'; applicationIndicator: string };
+}
+</pre>
+  <p><code>content</code> is a best-effort classification (WiFi credentials, vCards, URLs,
+  geo/tel/sms/email URIs, GS1 element strings) and it never throws. Payloads it does not
+  recognize come back as <code>{ type: 'text' }</code>. Disable it with
+  <code>parseContent:&nbsp;false</code> if you only want the raw text.</p>
+</section>
+
+<section id="payloads">
+  <p class="eyebrow">Payload semantics</p>
+  <h2>The parts of the spec most libraries skip.</h2>
+
+  <h3>GS1 / FNC1</h3>
+  <p>Symbols with FNC1 in first position carry GS1 data. cam2qr applies the
+  alphanumeric <code>%</code> escapes (<code>%%</code> → literal, lone <code>%</code> →
+  GS separator) and splits the element string into application identifiers:</p>
+  <pre class="code" data-lang="ts">
+result.content
+// { type: 'gs1', raw: '0104012345678903171912311021ABC…',
+//   elements: [ { ai: '01', value: '04012345678903' },   // GTIN
+//               { ai: '17', value: '191231' },            // expiry
+//               { ai: '10', value: 'ABC123' } ] }         // lot
+</pre>
+  <p class="aside">Fixed-length AIs come from the GS1 predefined-length table; anything
+  else reads to the next GS separator. FNC1 in second position surfaces its application
+  indicator on <code>result.fnc1</code>.</p>
+
+  <h3>Kanji mode</h3>
+  <p>Kanji-mode segments (13-bit packed Shift-JIS, spec §8.4.7) decode natively. No
+  dependency, no flag to set. The segment carries both the decoded text and the Shift-JIS
+  bytes.</p>
+
+  <h3>Structured append</h3>
+  <p>A payload can be split across up to 16 symbols. The scanner reassembles sequences by
+  default: parts are collected across frames (within a 30&nbsp;s window), and one
+  <code>decode</code> event fires with the joined payload once every symbol has been seen
+  <em>and</em> the parity byte (the XOR of all payload bytes) checks out. A misdecoded
+  part can never produce a corrupt join. Show all the symbols at once with
+  <code>multiple:&nbsp;true</code>, or pan across them. Set
+  <code>structuredAppend:&nbsp;'individual'</code> to receive the raw parts; the pure
+  <code>decode()</code>/<code>decodeAll()</code> functions always return parts with their
+  <code>structuredAppend</code> headers.</p>
+
+  <div class="callout">Every ECI charset in the AIM assignment table maps to its
+  <code>TextDecoder</code> label (the ISO-8859 series, Windows code pages, Shift-JIS,
+  Big5, GB18030, EUC-KR, UTF-8/16). Runtimes missing a converter fall back to the
+  UTF-8 → ISO-8859-1 heuristic instead of failing.</div>
+</section>
+
+<section id="adapters">
+  <p class="eyebrow">Framework adapters</p>
+  <h2>Thin wrappers, tree-shaken when unused.</h2>
+  <div class="tabs" role="tablist" aria-label="Adapter examples">
+    <button role="tab" aria-selected="true" data-tab="a-react">React</button>
+    <button role="tab" aria-selected="false" data-tab="a-vue">Vue</button>
+    <button role="tab" aria-selected="false" data-tab="a-svelte">Svelte</button>
+  </div>
+  <div class="tab-panel" data-panel="a-react"><pre class="code" data-lang="ts">
+import { useQrScanner } from 'cam2qr/react';
+
+function Scanner() {
+  const { videoRef, result, error, isScanning, scanner } = useQrScanner({
+    onDecode: (r) => console.log(r.text),
+  });
+  return &lt;video ref={videoRef} /&gt;;
+}
+// Starts when the video mounts; releases the camera on unmount.
+// enabled: false keeps the camera off; `scanner` gives imperative control.
+</pre></div>
+  <div class="tab-panel" data-panel="a-vue" hidden><pre class="code" data-lang="ts">
+// &lt;script setup&gt;
+import { useQrScanner } from 'cam2qr/vue';
+
+const { videoRef, result, error, isScanning, scanner } = useQrScanner({
+  onDecode: (r) => console.log(r.text),
+});
+// template:  &lt;video ref="videoRef"&gt;&lt;/video&gt;
+// `enabled` accepts a Ref&lt;boolean&gt; to toggle the camera reactively;
+// everything tears down when the component scope disposes.
+</pre></div>
+  <div class="tab-panel" data-panel="a-svelte" hidden><pre class="code" data-lang="ts">
+// &lt;script&gt;
+import { createQrScanner } from 'cam2qr/svelte';
+
+const { video, result, error, isScanning, scanner } = createQrScanner({
+  onDecode: (r) => console.log(r.text),
+});
+// markup:  &lt;video use:video&gt;&lt;/video&gt;
+//          {#if $result}&lt;p&gt;{$result.text}&lt;/p&gt;{/if}
+// Stores + an action, built on svelte/store; works with Svelte 3, 4, and 5.
+// Gate the &lt;video&gt; with {#if} to toggle scanning.
+</pre></div>
+  <p class="aside" style="margin-top:16px">React Native: the pure <code>decode()</code>
+  layer already runs under Hermes. A dedicated adapter package is planned; the
+  feasibility write-up lives in
+  <a href="https://github.com/Datawalke/cam2qr/blob/main/docs/react-native.md">docs/react-native.md</a>.</p>
+</section>
+
+<section id="node">
+  <p class="eyebrow">Node</p>
+  <h2>Decode server-side or in tests.</h2>
+  <pre class="code" data-lang="ts">
+import { readFileSync } from 'node:fs';
+import { PNG } from 'pngjs';           // any PNG decoder works
+import { decode } from 'cam2qr';
+
+const png = PNG.sync.read(readFileSync('ticket.png'));
+const result = decode({ data: png.data, width: png.width, height: png.height });
+console.log(result?.text);
+</pre>
+  <p class="aside">This is exactly how cam2qr's own test suite runs thousands of decodes
+  in CI. The pipeline has no DOM anywhere in it.</p>
+</section>
+
+<section id="performance">
+  <p class="eyebrow">Performance</p>
+  <h2>Where the milliseconds go.</h2>
+  <ul class="method-list">
+    <li><code>scanRegion</code>: the single biggest lever. A centered viewfinder box can cut per-frame cost by 4–10× and rejects background clutter.</li>
+    <li><code>maxScansPerSecond</code>: 15 is smooth; 5–10 still feels instant and halves the battery drain.</li>
+    <li><code>maxDownscale: 2</code> (the default): on 720p+ frames the downscaled pass usually decodes first, and it doubles as a low-pass filter for oversampled codes. It measured fastest in the comparative benchmark.</li>
+    <li><code>useWorker: true</code> (the default): keeps jank off the main thread. Frames transfer; they are not copied.</li>
+    <li><code>tryHarder</code>: save it for a retry path or for file uploads. It multiplies finder candidates and adds a blur-recovery pass.</li>
+    <li><code>useNativeDetector</code>: worth testing on Chromium-heavy fleets. Results lose codec metadata and behavior varies by platform, which is why it is off by default.</li>
+  </ul>
+  <p style="margin-top:20px">Numbers, not vibes: <a href="index.html#benchmarks">the
+  benchmarks section</a> shows measured detection rates and speed against jsQR and
+  @zxing/library, regenerated by <code>pnpm compare</code>.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 Datawalke</span>
+    <a href="index.html">Home</a>
+    <a href="how-it-works.html">How it works</a>
+    <a href="https://github.com/Datawalke/cam2qr">GitHub</a>
+    <span class="spacer"></span>
+    <span>MIT licensed · built from ISO/IEC 18004</span>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>

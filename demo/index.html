@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>cam2qr demo</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>cam2qr</h1>
+      <p class="tagline">Zero-dependency QR scanning — point a code at your camera.</p>
+
+      <div class="viewport">
+        <video id="video"></video>
+        <canvas id="overlay"></canvas>
+        <div id="status">starting camera…</div>
+      </div>
+
+      <div class="controls">
+        <select id="camera-select" title="Camera"></select>
+        <button id="torch" hidden>💡 Torch</button>
+        <button id="pause">⏸ Pause</button>
+        <label><input type="checkbox" id="try-harder" /> tryHarder</label>
+      </div>
+
+      <div id="result" hidden>
+        <div class="result-head">
+          <span id="content-type" class="badge"></span>
+          <span id="meta"></span>
+          <button id="copy">Copy</button>
+        </div>
+        <pre id="result-text"></pre>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "file": "synthetic-angled-gradient.png",
+      "expected": "https://example.com/corpus/angled",
+      "tags": ["synthetic", "perspective", "lighting"]
+    },
+    {
+      "file": "synthetic-rotated-blur.png",
+      "expected": "CORPUS ROTATED BLUR 01",
+      "tags": ["synthetic", "rotation", "blur", "contrast"]
+    },
+    {
+      "file": "synthetic-inverted-noise.png",
+      "expected": "corpus inverted + noise",
+      "tags": ["synthetic", "inverted", "noise"]
+    },
+    {
+      "file": "synthetic-dense-v10.png",
+      "expected": "https://example.com/very/long/path?with=query&params=for-a-version-10-symbol&checksum=0123456789abcdef0123456789abcdef",
+      "tags": ["synthetic", "dense"]
+    }
+  ]
+}
