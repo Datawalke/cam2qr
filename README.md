@@ -9,6 +9,7 @@ Zero-dependency TypeScript QR code scanning for the browser, camera included.
 The entire pipeline (adaptive binarization, finder-pattern location, perspective
 correction, Reed-Solomon error correction, segment decoding) is implemented independently
 from the ISO/IEC 18004 specification. Not a port or a wrapper of an existing scanner.
+Full docs and a how-it-works deep dive live at [cam2qr.com](https://cam2qr.com).
 
 - **Zero runtime dependencies.** One package, nothing else in your lockfile.
   13.4 kB brotli for the full camera scanner; 9.5 kB if you only import `decode()`.
