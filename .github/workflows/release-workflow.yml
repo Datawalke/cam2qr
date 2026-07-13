@@ -1,0 +1,55 @@
+# Release workflow. Lives in docs/ because automated sessions cannot push
+# workflow files; move it into place with:
+#   git mv docs/release-workflow.yml .github/workflows/release.yml
+#
+# Trigger: pushing a version tag (v1.0.0). It runs the full test gate
+# (via prepublishOnly), publishes to npm with a provenance attestation,
+# and creates a GitHub Release with generated notes.
+#
+# Requires the NPM_TOKEN repository secret: a granular npm access token
+# with read/write packages permission (and allowed to create new packages
+# for the first publish).
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the GitHub Release
+  id-token: write # npm provenance attestation
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Check tag matches package.json version
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          if [ "$pkg" != "$GITHUB_REF_NAME" ]; then
+            echo "package.json is $pkg but the tag is $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+      - name: Check the package is not marked private
+        run: |
+          if [ "$(node -p "!!require('./package.json').private")" = "true" ]; then
+            echo 'package.json still has "private": true' >&2
+            exit 1
+          fi
+      # prepublishOnly runs the full gate: typecheck, lint, test, build, size
+      - run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
