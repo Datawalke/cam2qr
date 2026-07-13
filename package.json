@@ -89,6 +89,7 @@
     "test:browser": "pnpm build && playwright test",
     "demo": "pnpm build && vite --config demo/vite.config.ts",
     "site": "node scripts/serve-site.mjs",
+    "site:lib": "pnpm build && node scripts/sync-site-lib.mjs",
     "site:snippets": "node scripts/extract-snippets.mjs",
     "compare": "vitest run --config vitest.compare.config.ts",
     "bench": "vitest bench --run",

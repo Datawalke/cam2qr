@@ -28,8 +28,14 @@ pnpm bench         # vitest bench — decode speed
 pnpm compare       # cam2qr vs jsQR vs @zxing/library → regenerates docs/benchmarks.md
 pnpm size          # size-limit bundle-size budget check
 pnpm demo          # build + serve the demo scanner page (Vite, port 5183)
+pnpm site          # serve the static marketing site (site/, port 5184)
+pnpm site:lib      # build + copy the ESM bundle into site/lib/cam2qr/ for the live demo
 pnpm ci            # typecheck && lint && test && build && size
 ```
+
+`site/lib/cam2qr/` is a committed copy of the built library that powers the live demo at
+cam2qr.com/demo — it is served same-origin so the module worker loads without a bundler.
+Re-run `pnpm site:lib` and commit the result whenever a release changes `dist/`.
 
 Run a single test file with `pnpm test <path>` (e.g. `pnpm test test/unit/gf256.test.ts`).
 Run `pnpm ci` before opening a pull request — it is the same gate CI runs

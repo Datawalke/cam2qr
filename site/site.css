@@ -234,6 +234,53 @@ footer { border-top: 1px solid var(--line); margin-top: 72px; padding: 32px 0 48
 .foot a { color: var(--muted); }
 .foot .spacer { flex: 1; }
 
+/* ————— live demo ————— */
+section.demo { border-top: 0; padding-top: 40px; max-width: 720px; }
+.demo [hidden] { display: none !important; }
+.demo-viewport {
+  position: relative; aspect-ratio: 4 / 3; overflow: hidden;
+  background: var(--code-bg); border: 1px solid var(--line);
+}
+.demo-viewport video, .demo-viewport canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+}
+.demo-start {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px; text-align: center;
+}
+.demo-start .btn { cursor: pointer; }
+.demo-start .btn:disabled { opacity: 0.5; cursor: wait; }
+.demo-start p { font-family: var(--mono); font-size: 0.78rem; color: var(--code-muted); margin: 0; padding: 0 20px; }
+.demo-status {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 7px 12px;
+  font-family: var(--mono); font-size: 0.78rem;
+  background: rgba(0, 0, 0, 0.55); color: #eceade;
+}
+.demo-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.demo-controls select, .demo-controls button {
+  font-family: var(--mono); font-size: 0.8rem; padding: 8px 14px; cursor: pointer;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+}
+.demo-controls select:hover, .demo-controls button:hover { border-color: var(--accent); color: var(--accent); }
+.demo-controls label { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+.demo-result { border: 1px solid var(--line); background: var(--surface); padding: 16px 18px; margin-top: 14px; }
+.demo-result .result-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.demo-result .badge {
+  font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: #fff; background: var(--accent); padding: 2px 8px;
+}
+.demo-result #meta { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); flex: 1; }
+.demo-result #copy {
+  font-family: var(--mono); font-size: 0.74rem; padding: 4px 10px; cursor: pointer;
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+}
+.demo-result #copy:hover { color: var(--accent); border-color: var(--accent); }
+.demo-result pre {
+  margin: 0; font-family: var(--mono); font-size: 0.9rem;
+  white-space: pre-wrap; word-break: break-all;
+}
+.demo-note { font-size: 0.85rem; color: var(--muted); margin-top: 20px; }
+
 /* ————— docs & article pages ————— */
 .page-head { padding: 56px 0 8px; }
 .page-head h1 { font-size: clamp(1.6rem, 4vw, 2.3rem); margin: 0 0 12px; letter-spacing: -0.02em; }
