@@ -58,6 +58,7 @@
 /* ————— base ————— */
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+[id] { scroll-margin-top: 66px; }
 body {
   margin: 0;
   background: var(--bg);
@@ -97,23 +98,41 @@ nav {
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
 }
-.nav-inner { display: flex; align-items: center; gap: 20px; height: 54px; }
+.nav-inner { display: flex; align-items: center; gap: 20px; min-height: 54px; }
 .wordmark {
   display: flex; align-items: center; gap: 9px;
   font-family: var(--mono); font-weight: 700; font-size: 1rem;
   text-decoration: none;
 }
 .wordmark svg { display: block; }
-.nav-links { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
+.nav-links { display: flex; gap: 6px 18px; margin-left: auto; flex-wrap: wrap; padding: 8px 0; }
 .nav-links a {
   font-family: var(--mono); font-size: 0.78rem; text-decoration: none; color: var(--muted);
 }
 .nav-links a:hover, .nav-links a[aria-current="page"] { color: var(--accent); }
-#theme-toggle {
+#theme-toggle, .nav-toggle {
   background: none; border: 1px solid var(--line); color: var(--muted);
   font-family: var(--mono); font-size: 0.72rem; padding: 4px 10px; cursor: pointer;
 }
-#theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+#theme-toggle:hover, .nav-toggle:hover, .nav-toggle[aria-expanded="true"] {
+  color: var(--accent); border-color: var(--accent);
+}
+.nav-toggle { display: none; }
+@media (max-width: 720px) {
+  .nav-inner { gap: 12px; }
+  #theme-toggle { margin-left: auto; }
+  .nav-toggle { display: block; }
+  .nav-links {
+    display: none;
+    position: absolute; top: 100%; left: 0; right: 0;
+    flex-direction: column; gap: 0; margin: 0; padding: 0 0 6px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    max-height: calc(100vh - 54px); overflow-y: auto;
+  }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 12px 24px; border-top: 1px solid var(--line); font-size: 0.85rem; }
+}
 
 /* ————— hero ————— */
 header.hero { padding: 72px 0 64px; }
@@ -170,9 +189,9 @@ header.hero { padding: 72px 0 64px; }
 .cell .glyph { font-family: var(--mono); color: var(--accent); font-size: 0.85rem; display: block; margin-bottom: 10px; }
 
 /* ————— code ————— */
-.tabs { display: flex; gap: 0; margin-top: 26px; border: 1px solid var(--line); border-bottom: 0; width: fit-content; }
+.tabs { display: flex; gap: 0; margin-top: 26px; border: 1px solid var(--line); border-bottom: 0; width: fit-content; max-width: 100%; overflow-x: auto; }
 .tabs button {
-  font-family: var(--mono); font-size: 0.8rem; padding: 9px 18px;
+  font-family: var(--mono); font-size: 0.8rem; padding: 9px 18px; white-space: nowrap; flex-shrink: 0;
   background: var(--surface); color: var(--muted); border: 0; border-right: 1px solid var(--line); cursor: pointer;
 }
 .tabs button:last-child { border-right: 0; }
@@ -338,6 +357,15 @@ section.demo { border-top: 0; padding-top: 40px; max-width: 720px; }
 .rail-meta a:hover { color: var(--accent); }
 .rail-panel pre.code { margin: 0; font-size: 0.78rem; max-height: calc(100vh - 190px); overflow: auto; }
 @keyframes rail-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ————— small-screen spacing ————— */
+@media (max-width: 640px) {
+  section, .docs section { padding: 48px 0 8px; }
+  header.hero { padding: 44px 0 44px; }
+  .page-head { padding: 40px 0 8px; }
+  .grid-3 .cell, .stage { padding: 18px; }
+  pre.code { padding: 16px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

@@ -14,6 +14,27 @@
   });
 })();
 
+/* Mobile nav menu */
+(function () {
+  const btn = document.querySelector('.nav-toggle');
+  const links = document.getElementById('nav-links');
+  if (!btn || !links) return;
+  const close = () => {
+    links.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  };
+  btn.addEventListener('click', () => {
+    const open = links.classList.toggle('open');
+    btn.setAttribute('aria-expanded', String(open));
+  });
+  links.addEventListener('click', (event) => {
+    if (event.target.closest('a')) close();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+})();
+
 /* Tabs */
 document.querySelectorAll('.tabs [role="tab"]').forEach((tab) => {
   tab.addEventListener('click', () => {
