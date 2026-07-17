@@ -65,6 +65,12 @@ import { createQrScanner } from 'cam2qr/svelte'; // optional peer: svelte >= 3.5
   <code>cam2qr/worker</code>, and bundlers that understand
   <code>new&nbsp;Worker(new&nbsp;URL(…))</code> (Vite, webpack, Rollup…) pick it up on
   their own.</p>
+  <p class="aside">The subpath entries (<code>cam2qr/react</code>, <code>/vue</code>,
+  <code>/svelte</code>) resolve through the package <code>exports</code> map on modern
+  toolchains and through root directory stubs on classic <code>moduleResolution: node</code>
+  (TypeScript&nbsp;&lt;&nbsp;5, Create React App, older Jest/Metro resolvers) — so they import
+  cleanly either way, with no <code>declare module</code> shim or Jest
+  <code>moduleNameMapper</code>.</p>
 </section>
 
 <section id="scanning">
@@ -135,6 +141,24 @@ await scanner.start();
       </tbody>
     </table>
   </div>
+
+  <h3>Camera vs. decode errors</h3>
+  <p><code>start()</code> only ever rejects with a <code>CameraError</code>. The
+  <code>error</code> event, though, delivers either half of the typed contract:
+  a <code>CameraError</code> for camera/stream faults (the codes above), or a
+  <code>DecodeError</code> when the decode runner itself trips — a frame that failed to
+  decode, or the Web Worker crashing (<code>code: 'runner-failed'</code>). That split means a
+  worker hiccup is no longer mislabeled as a dead camera. Branch on <code>error.name</code>:</p>
+  <pre class="code" data-lang="ts">
+scanner.on('error', (error) => {
+  if (error.name === 'CameraError') {
+    if (error.code === 'permission-denied') showPermissionHelp();
+    return;
+  }
+  // DecodeError (e.g. 'runner-failed'): decoding hiccuped, not the camera. The
+  // scanner keeps running — a failed worker transparently falls back inline.
+});
+</pre>
 </section>
 
 <section id="overlays">
@@ -270,37 +294,49 @@ result.content
   <div class="tab-panel" data-panel="a-react"><pre class="code" data-lang="ts">
 import { useQrScanner } from 'cam2qr/react';
 
-function Scanner() {
+function Scanner({ open }: { open: boolean }) {
   const { videoRef, result, error, isScanning, scanner } = useQrScanner({
+    paused: !open,                       // suspend decoding, keep the camera warm
     onDecode: (r) => console.log(r.text),
   });
   return &lt;video ref={videoRef} /&gt;;
 }
 // Starts when the video mounts; releases the camera on unmount.
-// enabled: false keeps the camera off; `scanner` gives imperative control.
+// enabled: false releases the camera; paused suspends decoding with no
+// black-flash (and lands even if set before startup finishes). `scanner`
+// gives imperative control (torch, setCamera, update). `error` is a
+// CameraError | DecodeError.
 </pre></div>
   <div class="tab-panel" data-panel="a-vue" hidden><pre class="code" data-lang="ts">
 // &lt;script setup&gt;
+import { ref } from 'vue';
 import { useQrScanner } from 'cam2qr/vue';
 
-const { videoRef, result, error, isScanning, scanner } = useQrScanner({
+const paused = ref(false);
+const { videoRef, result, isScanning, scanner } = useQrScanner({
+  paused,                                // boolean | Ref&lt;boolean&gt;, reactive
   onDecode: (r) => console.log(r.text),
 });
 // template:  &lt;video ref="videoRef"&gt;&lt;/video&gt;
-// `enabled` accepts a Ref&lt;boolean&gt; to toggle the camera reactively;
-// everything tears down when the component scope disposes.
+// `enabled` and `paused` both accept a Ref to toggle reactively — enabled
+// releases the camera, paused keeps the stream warm. Everything tears down
+// when the component scope disposes.
 </pre></div>
   <div class="tab-panel" data-panel="a-svelte" hidden><pre class="code" data-lang="ts">
 // &lt;script&gt;
+import { writable } from 'svelte/store';
 import { createQrScanner } from 'cam2qr/svelte';
 
-const { video, result, error, isScanning, scanner } = createQrScanner({
+const paused = writable(false);
+const { video, result, isScanning, scanner } = createQrScanner({
+  paused,                                // boolean | Readable&lt;boolean&gt;, reactive
   onDecode: (r) => console.log(r.text),
 });
 // markup:  &lt;video use:video&gt;&lt;/video&gt;
 //          {#if $result}&lt;p&gt;{$result.text}&lt;/p&gt;{/if}
 // Stores + an action, built on svelte/store; works with Svelte 3, 4, and 5.
-// Gate the &lt;video&gt; with {#if} to toggle scanning.
+// Unmount the &lt;video&gt; ({#if}) to release the camera; toggle `paused` to
+// suspend decoding without dropping the stream.
 </pre></div>
   <p class="aside" style="margin-top:16px">React Native: the pure <code>decode()</code>
   layer already runs under Hermes. A dedicated adapter package is planned; the

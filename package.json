@@ -57,8 +57,27 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "react/package.json",
+    "vue/package.json",
+    "svelte/package.json"
   ],
+  "typesVersions": {
+    "*": {
+      "react": [
+        "dist/react.d.ts"
+      ],
+      "vue": [
+        "dist/vue.d.ts"
+      ],
+      "svelte": [
+        "dist/svelte.d.ts"
+      ],
+      "worker": [
+        "dist/worker.d.ts"
+      ]
+    }
+  },
   "peerDependencies": {
     "react": ">=18",
     "vue": ">=3.2",

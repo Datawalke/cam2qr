@@ -7,6 +7,7 @@ import {
 import { CameraError } from '../camera/errors.js';
 import { type FrameSource, type Region, createCanvasFrameSource } from '../camera/frame-grabber.js';
 import { type CameraOptions, startStream, stopStream } from '../camera/stream.js';
+import { DecodeError } from '../errors.js';
 import type { Detection, QrResult } from '../types.js';
 import { Deduper } from './dedupe.js';
 import { type DecodeRunner, createDecodeRunner } from './runner.js';
@@ -60,8 +61,16 @@ export interface QrScannerOptions {
    * when the frame contains none — drive live outline overlays with this.
    */
   onDetect?: (detections: Detection[] | null) => void;
-  onError?: (error: CameraError) => void;
+  onError?: (error: ScannerError) => void;
 }
+
+/**
+ * The `error` event carries either flavor of the typed contract: `CameraError`
+ * for camera/stream faults (permission, device, stream setup) and `DecodeError`
+ * for decode-runner faults (a frame failing to decode, the Web Worker
+ * crashing). Match on `error.name` (or `instanceof`) to tell them apart.
+ */
+export type ScannerError = CameraError | DecodeError;
 
 /** Options changeable while the scanner runs (via update()). */
 export type QrScannerUpdate = Pick<
@@ -80,7 +89,7 @@ export type QrScannerUpdate = Pick<
 export interface ScannerEventMap {
   decode: QrResult;
   detect: Detection[] | null;
-  error: CameraError;
+  error: ScannerError;
   start: undefined;
   stop: undefined;
 }
@@ -131,6 +140,8 @@ export class QrScanner {
   private lastDecodeAt = Number.NEGATIVE_INFINITY;
   private decoding = false;
   private hiddenPause = false;
+  /** A pause requested during the async 'starting' window, honored at start. */
+  private pendingPause = false;
   private readonly onVisibilityChange = (): void => {
     if (!this.options.pauseOnHidden || typeof document === 'undefined') return;
     if (document.visibilityState === 'hidden') {
@@ -209,6 +220,13 @@ export class QrScanner {
     this.deduper.reset();
     this.assembler.reset();
     this.emit('start', undefined);
+    // A pause() (or resume()) issued while we were 'starting' is applied now
+    // that scanning has actually begun, so an initial suspend lands.
+    if (this.pendingPause) {
+      this.pendingPause = false;
+      this.pause();
+      return;
+    }
     this.scheduleNext();
   }
 
@@ -226,6 +244,12 @@ export class QrScanner {
 
   /** Suspends decoding but keeps the camera stream alive. */
   pause(): void {
+    // A pause requested mid-startup is remembered and honored once start()
+    // reaches 'scanning' — otherwise the initial suspend would silently no-op.
+    if (this.state === 'starting') {
+      this.pendingPause = true;
+      return;
+    }
     if (this.state !== 'scanning') return;
     this.cancelLoop();
     this.state = 'paused';
@@ -233,6 +257,11 @@ export class QrScanner {
 
   /** Resumes decoding after pause(). */
   resume(): void {
+    // Mirror pause(): a resume during startup cancels a pending initial pause.
+    if (this.state === 'starting') {
+      this.pendingPause = false;
+      return;
+    }
     if (this.state !== 'paused') return;
     this.state = 'scanning';
     this.scheduleNext();
@@ -414,7 +443,10 @@ export class QrScanner {
         }
       }
     } catch (error) {
-      this.emit('error', CameraError.from(error));
+      // A throw here comes from the decode runner (a frame that failed to
+      // decode, or the Web Worker crashing) — not the camera stream, so it
+      // surfaces as a DecodeError rather than being mislabeled stream-failed.
+      this.emit('error', DecodeError.from(error));
     } finally {
       this.decoding = false;
     }

@@ -12,6 +12,7 @@ export {
   QrScanner,
   type QrScannerOptions,
   type QrScannerUpdate,
+  type ScannerError,
   type ScannerEventMap,
 } from './scanner/scanner.js';
 export type {

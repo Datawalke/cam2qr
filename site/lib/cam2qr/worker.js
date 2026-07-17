@@ -1,4 +1,4 @@
-import { scanFrame } from './chunk-VQB7DEOH.js';
+import { scanFrame } from './chunk-FFVNZWKB.js';
 
 // src/worker.ts
 var scope = self;

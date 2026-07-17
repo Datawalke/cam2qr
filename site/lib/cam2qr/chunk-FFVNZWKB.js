@@ -218,11 +218,22 @@ var BitMatrix = class _BitMatrix {
 };
 
 // src/errors.ts
-var DecodeError = class extends Error {
-  constructor(code, message) {
+var DecodeError = class _DecodeError extends Error {
+  constructor(code, message, cause) {
     super(message);
     this.code = code;
+    this.cause = cause;
     this.name = "DecodeError";
+  }
+  /**
+   * Wraps a decode/worker fault as a typed DecodeError, passing an existing
+   * DecodeError through unchanged. Used to keep runner failures out of the
+   * camera-stream error channel (see QrScanner's error event).
+   */
+  static from(error) {
+    if (error instanceof _DecodeError) return error;
+    const message = error instanceof Error ? error.message : String(error);
+    return new _DecodeError("runner-failed", message, error);
   }
 };
 
@@ -1147,7 +1158,11 @@ function readEciAssignment(reader) {
   }
   throw new DecodeError("bitstream", "invalid ECI designator");
 }
-var textEncoder = new TextEncoder();
+var textEncoder;
+function encodeUtf8(text) {
+  textEncoder ?? (textEncoder = new TextEncoder());
+  return textEncoder.encode(text);
+}
 function decodeSegments(data, version) {
   const reader = new BitReader(data);
   const segments = [];
@@ -1165,7 +1180,7 @@ function decodeSegments(data, version) {
         const decoded = decodeNumeric(reader, count);
         segments.push({ mode: "numeric", text: decoded });
         text += decoded;
-        byteChunks.push(textEncoder.encode(decoded));
+        byteChunks.push(encodeUtf8(decoded));
         break;
       }
       case MODE_ALPHANUMERIC: {
@@ -1174,7 +1189,7 @@ function decodeSegments(data, version) {
         if (fnc1 !== void 0) decoded = applyFnc1Escapes(decoded);
         segments.push({ mode: "alphanumeric", text: decoded });
         text += decoded;
-        byteChunks.push(textEncoder.encode(decoded));
+        byteChunks.push(encodeUtf8(decoded));
         break;
       }
       case MODE_BYTE: {
@@ -2043,5 +2058,5 @@ function planScales(gray, options) {
 }
 
 export { BitMatrix, DecodeError, decode, decodeAll, decodeMatrix, detect, parseContent, scanFrame };
-//# sourceMappingURL=chunk-VQB7DEOH.js.map
-//# sourceMappingURL=chunk-VQB7DEOH.js.map
+//# sourceMappingURL=chunk-FFVNZWKB.js.map
+//# sourceMappingURL=chunk-FFVNZWKB.js.map

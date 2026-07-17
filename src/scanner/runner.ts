@@ -34,8 +34,13 @@ export function createDecodeRunner(useWorker: boolean, useNativeDetector = false
 function createEngineRunner(useWorker: boolean): DecodeRunner {
   if (useWorker) {
     const worker = tryCreateWorker();
-    if (worker) return createWorkerRunner(worker);
+    if (worker) return createWorkerRunner(worker, createInlineRunner);
   }
+  return createInlineRunner();
+}
+
+/** Synchronous, main-thread decode — the always-available fallback. */
+function createInlineRunner(): DecodeRunner {
   return {
     scan: (image, options) => Promise.resolve(scanFrame(image, options)),
     destroy(): void {},
@@ -53,41 +58,68 @@ function tryCreateWorker(): Worker | null {
   }
 }
 
-function createWorkerRunner(worker: Worker): DecodeRunner {
+/**
+ * Runs scans on a module worker, but self-heals: if the worker fails at
+ * runtime (`onerror` — a 404 on the chunk, a CSP block, an offline
+ * precache miss), it terminates the worker and permanently hands over to the
+ * inline engine, re-running any in-flight scans there instead of rejecting
+ * them forever. This mirrors the native-detector fallback in native.ts, so a
+ * scanner started with useWorker never gets stuck emitting errors.
+ */
+function createWorkerRunner(worker: Worker, fallback: () => DecodeRunner): DecodeRunner {
   let nextId = 0;
   const pending = new Map<
     number,
-    { resolve: (r: FrameScan) => void; reject: (e: Error) => void }
+    {
+      image: ImageDataLike;
+      options: ScanFrameOptions;
+      resolve: (r: FrameScan) => void;
+      reject: (e: Error) => void;
+    }
   >();
+  let inline: DecodeRunner | null = null;
 
   worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
     const { id, results, detections, error } = event.data;
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
+    // A per-message `error` is the worker reporting a single frame threw — a
+    // decode fault, not a worker failure. Reject so it surfaces like the inline
+    // engine's throw would; it does not trigger the self-heal fallback.
     if (error !== undefined) entry.reject(new Error(error));
     else entry.resolve({ results: results ?? [], detections: detections ?? [] });
   };
   worker.onerror = () => {
-    const entries = [...pending.values()];
+    if (inline) return;
+    // The worker itself died: switch to the inline engine and rescue every
+    // in-flight scan by re-running it there instead of rejecting it.
+    inline = fallback();
+    worker.terminate();
+    const inflight = [...pending.values()];
     pending.clear();
-    for (const entry of entries) entry.reject(new Error('decode worker crashed'));
+    for (const entry of inflight) {
+      inline.scan(entry.image, entry.options).then(entry.resolve, entry.reject);
+    }
   };
 
   return {
     scan(image, options): Promise<FrameScan> {
+      if (inline) return inline.scan(image, options);
       const id = nextId++;
       // Copy into a transferable buffer: the caller's frame may be reused.
+      // The original `image` is kept intact so a self-heal can re-run inline.
       const buffer = new Uint8ClampedArray(image.data).buffer;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        pending.set(id, { image, options, resolve, reject });
         worker.postMessage({ id, buffer, width: image.width, height: image.height, options }, [
           buffer,
         ]);
       });
     },
     destroy(): void {
-      worker.terminate();
+      if (!inline) worker.terminate();
+      inline?.destroy();
       pending.clear();
     },
   };

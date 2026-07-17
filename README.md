@@ -99,11 +99,24 @@ const scanner = new QrScanner(video, {
 });
 ```
 
-### Camera error codes
+### Error codes
 
-`start()` rejects (and the `error` event fires) with a `CameraError` whose `code` is one of
-`permission-denied`, `camera-not-found`, `camera-in-use`, `insecure-context` (camera needs
-HTTPS or localhost), `unsupported`, `stream-failed`.
+`start()` rejects with a `CameraError` whose `code` is one of `permission-denied`,
+`camera-not-found`, `camera-in-use`, `insecure-context` (camera needs HTTPS or localhost),
+`unsupported`, `stream-failed`.
+
+The `error` event carries either typed flavor, so you can tell a camera fault from a decode
+fault: a **`CameraError`** for camera/stream problems (the codes above), or a
+**`DecodeError`** when the decode runner itself fails — a frame that failed to decode or the
+Web Worker crashing (`code: 'runner-failed'`). Match on `error.name`:
+
+```ts
+scanner.on('error', (error) => {
+  if (error.name === 'CameraError' && error.code === 'permission-denied') showPermissionHelp();
+  // DecodeError (e.g. 'runner-failed') means decoding hiccuped, not the camera —
+  // the scanner keeps running (a failed worker transparently falls back inline).
+});
+```
 
 ## One-shot decoding
 
@@ -187,6 +200,15 @@ The hook starts the camera when the video mounts, releases it on unmount, and re
 results/errors. Pass `enabled: false` to keep the camera off; use `scanner` for imperative
 control (torch, camera switching, `update()`).
 
+Pass `paused` to suspend and resume decoding **without releasing the camera** — no
+black-flash or permission re-prompt, unlike toggling `enabled`. It is reactive and correct
+from the first render, so `paused: true` starts the scanner suspended (the stream still warms
+up) and flips live as the prop changes:
+
+```tsx
+const { videoRef } = useQrScanner({ paused: !isSheetOpen });
+```
+
 ## Vue
 
 ```vue
@@ -205,7 +227,9 @@ const { videoRef, result, error, isScanning, scanner } = useQrScanner({
 ```
 
 Same lifecycle as the React hook, with refs instead of state. `enabled` accepts a `Ref` to
-toggle the camera reactively; everything is torn down when the component's scope disposes.
+toggle the camera reactively; `paused` (also `boolean | Ref<boolean>`) suspends and resumes
+decoding while keeping the camera stream warm — no black-flash, unlike `enabled`. Everything
+is torn down when the component's scope disposes.
 
 ## Svelte
 
@@ -224,7 +248,30 @@ toggle the camera reactively; everything is torn down when the component's scope
 
 Readable stores plus an action (built on `svelte/store` only, so Svelte 3, 4, and 5 all
 work). The camera starts when the `<video>` mounts and is released when it unmounts, so
-you can gate the element with `{#if}` to toggle scanning.
+you can gate the element with `{#if}` to toggle scanning. To suspend decoding *without*
+releasing the camera, pass `paused` — a boolean, or a store to toggle reactively:
+
+```svelte
+<script>
+  import { writable } from 'svelte/store';
+  const paused = writable(false);
+  const { video, result } = createQrScanner({ paused });
+</script>
+
+<video use:video></video>
+<button on:click={() => paused.update((p) => !p)}>Toggle</button>
+```
+
+## Bundlers & legacy resolvers (CRA, TS < 5)
+
+The subpath entries (`cam2qr/react`, `cam2qr/vue`, `cam2qr/svelte`) work out of the box with
+modern bundlers and TypeScript's `bundler`/`node16`/`nodenext` resolution via the package
+`exports` map. For toolchains still on classic `moduleResolution: node` — TypeScript < 5,
+Create React App / react-scripts, older Jest/Metro resolvers — the package also ships
+directory stubs (`react/package.json`, …) that point those resolvers at the same build, so
+`import { useQrScanner } from 'cam2qr/react'` resolves its types and its module without any
+`declare module` shim or Jest `moduleNameMapper`. No configuration is needed; the root
+`decode`/`QrScanner` entry never depended on this.
 
 ## Node and other runtimes
 

@@ -20,7 +20,7 @@ function makeHarness(payload: string) {
     margin: 4,
   });
   const harness = makeManualInternals({ frame: () => frame, mediaDevices });
-  return { ...harness, track, video: makeFakeVideo() };
+  return { ...harness, track, mediaDevices, video: makeFakeVideo() };
 }
 
 describe('useQrScanner', () => {
@@ -56,6 +56,54 @@ describe('useQrScanner', () => {
     rerender({ enabled: false });
     await waitFor(() => expect(result.current.isScanning).toBe(false));
     expect(harness.track.stop).toHaveBeenCalled();
+    unmount();
+  });
+
+  it('paused: true starts suspended even through the async startup window', async () => {
+    const harness = makeHarness('start suspended');
+    const { result, rerender, unmount } = renderHook(
+      ({ paused }: { paused: boolean }) => useQrScanner({ paused }, harness.internals),
+      { initialProps: { paused: true } },
+    );
+
+    act(() => result.current.videoRef(harness.video));
+    // The stream comes up (isScanning), but decoding is suspended: no scan
+    // loop is scheduled and no result arrives.
+    await waitFor(() => expect(result.current.isScanning).toBe(true));
+    expect(harness.loop.pendingTicks()).toBe(0);
+    await act(() => harness.loop.runTick());
+    expect(result.current.result).toBeNull();
+
+    // Resuming decodes without ever having released the camera.
+    rerender({ paused: false });
+    await act(() => harness.loop.runTick());
+    await waitFor(() => expect(result.current.result?.text).toBe('start suspended'));
+    expect(harness.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('toggling paused resumes/suspends without re-requesting the camera', async () => {
+    const harness = makeHarness('warm stream');
+    const { result, rerender, unmount } = renderHook(
+      ({ paused }: { paused: boolean }) => useQrScanner({ paused }, harness.internals),
+      { initialProps: { paused: false } },
+    );
+
+    act(() => result.current.videoRef(harness.video));
+    await waitFor(() => expect(result.current.isScanning).toBe(true));
+    await act(() => harness.loop.runTick());
+    await waitFor(() => expect(result.current.result?.text).toBe('warm stream'));
+
+    // Pause: the scan loop stops, but the stream stays live (no track.stop).
+    rerender({ paused: true });
+    await waitFor(() => expect(harness.loop.pendingTicks()).toBe(0));
+    expect(harness.track.stop).not.toHaveBeenCalled();
+
+    // Resume: scanning continues on the same camera.
+    rerender({ paused: false });
+    await act(() => harness.loop.runTick());
+    expect(harness.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(harness.track.stop).not.toHaveBeenCalled();
     unmount();
   });
 

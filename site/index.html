@@ -155,6 +155,7 @@ function Scanner() {
     onDecode: (r) => console.log(r.text),
   });
   // starts when the video mounts; releases the camera on unmount
+  // enabled toggles the camera; paused suspends decoding, stream kept warm
   return &lt;video ref={videoRef} /&gt;;
 }
 </pre></div>
@@ -167,6 +168,7 @@ const { videoRef, result, isScanning } = useQrScanner({
 });
 // template:  &lt;video ref="videoRef"&gt;&lt;/video&gt;
 //            &lt;p v-if="result"&gt;{{ result.text }}&lt;/p&gt;
+// enabled / paused accept a Ref to toggle reactively
 </pre></div>
   <div class="tab-panel" data-panel="svelte" hidden><pre class="code" data-lang="ts">
 // &lt;script&gt;
@@ -177,6 +179,7 @@ const { video, result } = createQrScanner({
 });
 // markup:  &lt;video use:video&gt;&lt;/video&gt;
 //          {#if $result}&lt;p&gt;{$result.text}&lt;/p&gt;{/if}
+// pass paused (boolean | store) to suspend without releasing the camera
 </pre></div>
 </section>
 
