@@ -394,6 +394,14 @@ var QrScanner = class {
     this.listeners = /* @__PURE__ */ new Map();
     this.state = "idle";
     this.stream = null;
+    /**
+     * Generation token invalidating in-flight stream acquisitions. Every
+     * acquisition takes a new generation, and stop()/destroy() bump it; an
+     * awaited getUserMedia that resolves under a stale generation no longer
+     * owns the scanner — it must stop the stream it acquired and bail instead
+     * of resurrecting state that was torn down behind its back.
+     */
+    this.startGen = 0;
     this.frameSource = null;
     this.runner = null;
     this.cancelTick = null;
@@ -451,14 +459,23 @@ var QrScanner = class {
       return;
     }
     this.state = "starting";
+    const gen = ++this.startGen;
     try {
-      this.stream = await startStream(this.options.camera, this.internals.mediaDevices);
+      const stream = await startStream(this.options.camera, this.internals.mediaDevices);
+      if (gen !== this.startGen) {
+        stopStream(stream);
+        return;
+      }
+      this.stream = stream;
       await this.attachStream();
     } catch (error) {
-      this.state = "idle";
-      this.releaseStream();
+      if (gen === this.startGen) {
+        this.state = "idle";
+        this.releaseStream();
+      }
       throw CameraError.from(error);
     }
+    if (gen !== this.startGen) return;
     this.frameSource ?? (this.frameSource = this.internals.createFrameSource(this.video));
     this.runner ?? (this.runner = this.internals.createRunner(
       this.options.useWorker,
@@ -481,6 +498,8 @@ var QrScanner = class {
   /** Stops scanning and releases the camera. */
   stop() {
     if (this.state === "idle" || this.state === "destroyed") return;
+    this.startGen++;
+    this.pendingPause = false;
     this.cancelLoop();
     this.releaseStream();
     if (typeof document !== "undefined") {
@@ -512,6 +531,7 @@ var QrScanner = class {
   /** Full teardown; the instance cannot be reused afterwards. */
   destroy() {
     this.stop();
+    this.startGen++;
     this.runner?.destroy();
     this.runner = null;
     this.frameSource?.destroy();
@@ -527,8 +547,20 @@ var QrScanner = class {
     const wasScanning = this.state === "scanning";
     this.cancelLoop();
     this.releaseStream();
-    this.stream = await startStream(camera, this.internals.mediaDevices);
-    await this.attachStream();
+    const gen = ++this.startGen;
+    try {
+      const stream = await startStream(camera, this.internals.mediaDevices);
+      if (gen !== this.startGen) {
+        stopStream(stream);
+        return;
+      }
+      this.stream = stream;
+      await this.attachStream();
+    } catch (error) {
+      if (gen === this.startGen) this.stop();
+      throw CameraError.from(error);
+    }
+    if (gen !== this.startGen) return;
     if (wasScanning) {
       this.state = "scanning";
       this.scheduleNext();
@@ -686,5 +718,5 @@ function defaultSchedule(video, callback) {
 }
 
 export { CameraError, QrScanner, listCameras };
-//# sourceMappingURL=chunk-WVHCQIVG.js.map
-//# sourceMappingURL=chunk-WVHCQIVG.js.map
+//# sourceMappingURL=chunk-7EV6T3LN.js.map
+//# sourceMappingURL=chunk-7EV6T3LN.js.map

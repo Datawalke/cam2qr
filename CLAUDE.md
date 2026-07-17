@@ -20,8 +20,9 @@ Non-negotiables, restated for emphasis:
 - **Preserve the error contract**: typed `DecodeError`/`CameraError`; `decode()` returns
   `null` for "no decodable code" and only throws on invalid input.
 - **ESM imports use explicit `.js` extensions**; formatting is Biome (`pnpm lint:fix`).
-- `package.json` is `"private": true` until the npm launch — do not remove that without
-  being asked.
+- The package is live on npm. Releases are cut by bumping `package.json` and pushing a
+  matching `v*` tag; the Release workflow publishes and creates the GitHub release. Keep
+  `CHANGELOG.md` current.
 - Run `pnpm ci` (typecheck + lint + test + build + size) before considering a change done.
 - Do not create or modify files under `.github/workflows/` — automated sessions cannot
   push workflow changes.

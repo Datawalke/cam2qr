@@ -134,6 +134,14 @@ export class QrScanner {
 
   private state: ScannerState = 'idle';
   private stream: MediaStream | null = null;
+  /**
+   * Generation token invalidating in-flight stream acquisitions. Every
+   * acquisition takes a new generation, and stop()/destroy() bump it; an
+   * awaited getUserMedia that resolves under a stale generation no longer
+   * owns the scanner — it must stop the stream it acquired and bail instead
+   * of resurrecting state that was torn down behind its back.
+   */
+  private startGen = 0;
   private frameSource: FrameSource | null = null;
   private runner: DecodeRunner | null = null;
   private cancelTick: (() => void) | null = null;
@@ -199,14 +207,27 @@ export class QrScanner {
     }
 
     this.state = 'starting';
+    const gen = ++this.startGen;
     try {
-      this.stream = await startStream(this.options.camera, this.internals.mediaDevices);
+      const stream = await startStream(this.options.camera, this.internals.mediaDevices);
+      if (gen !== this.startGen) {
+        // stop()/destroy() (or a newer acquisition) superseded us mid-await;
+        // the stream we just got has no owner, so release it and stay down.
+        stopStream(stream);
+        return;
+      }
+      this.stream = stream;
       await this.attachStream();
     } catch (error) {
-      this.state = 'idle';
-      this.releaseStream();
+      if (gen === this.startGen) {
+        this.state = 'idle';
+        this.releaseStream();
+      }
       throw CameraError.from(error);
     }
+    // Superseded during attach: whoever bumped the generation already
+    // released this.stream (stop/destroy) or took it over (a new acquisition).
+    if (gen !== this.startGen) return;
 
     this.frameSource ??= this.internals.createFrameSource(this.video);
     this.runner ??= this.internals.createRunner(
@@ -233,6 +254,8 @@ export class QrScanner {
   /** Stops scanning and releases the camera. */
   stop(): void {
     if (this.state === 'idle' || this.state === 'destroyed') return;
+    this.startGen++; // invalidate any in-flight stream acquisition
+    this.pendingPause = false;
     this.cancelLoop();
     this.releaseStream();
     if (typeof document !== 'undefined') {
@@ -270,6 +293,7 @@ export class QrScanner {
   /** Full teardown; the instance cannot be reused afterwards. */
   destroy(): void {
     this.stop();
+    this.startGen++; // stop() no-ops from 'idle'; in-flight acquisitions must still die
     this.runner?.destroy();
     this.runner = null;
     this.frameSource?.destroy();
@@ -286,8 +310,24 @@ export class QrScanner {
     const wasScanning = this.state === 'scanning';
     this.cancelLoop();
     this.releaseStream();
-    this.stream = await startStream(camera, this.internals.mediaDevices);
-    await this.attachStream();
+    const gen = ++this.startGen;
+    try {
+      const stream = await startStream(camera, this.internals.mediaDevices);
+      if (gen !== this.startGen) {
+        // destroy()/stop() during the switch: the replacement stream has no
+        // owner — release it and leave the teardown in place.
+        stopStream(stream);
+        return;
+      }
+      this.stream = stream;
+      await this.attachStream();
+    } catch (error) {
+      // The old stream is already gone; a half-switched scanner would report
+      // 'scanning' with no camera and no loop, so tear down cleanly instead.
+      if (gen === this.startGen) this.stop();
+      throw CameraError.from(error);
+    }
+    if (gen !== this.startGen) return;
     if (wasScanning) {
       this.state = 'scanning';
       this.scheduleNext();

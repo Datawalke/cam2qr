@@ -1,4 +1,4 @@
-export { CameraError, QrScanner, listCameras } from './chunk-WVHCQIVG.js';
+export { CameraError, QrScanner, listCameras } from './chunk-7EV6T3LN.js';
 export { BitMatrix, DecodeError, decode, decodeAll, decodeMatrix, detect, parseContent } from './chunk-FFVNZWKB.js';
 
 // src/scanner/coords.ts

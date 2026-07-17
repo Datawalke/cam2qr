@@ -200,6 +200,13 @@ The hook starts the camera when the video mounts, releases it on unmount, and re
 results/errors. Pass `enabled: false` to keep the camera off; use `scanner` for imperative
 control (torch, camera switching, `update()`).
 
+Options are captured when the scanner is created — changing `camera` on a later render does
+**not** switch cameras. Switch imperatively instead:
+
+```tsx
+scanner?.setCamera({ facing: 'user' }); // or { deviceId } from listCameras()
+```
+
 Pass `paused` to suspend and resume decoding **without releasing the camera** — no
 black-flash or permission re-prompt, unlike toggling `enabled`. It is reactive and correct
 from the first render, so `paused: true` starts the scanner suspended (the stream still warms

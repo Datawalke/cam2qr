@@ -36,6 +36,40 @@ export function makeFakeMediaDevices(stream: MediaStream): MediaDevices & {
   } as unknown as MediaDevices & { getUserMedia: ReturnType<typeof vi.fn> };
 }
 
+/**
+ * getUserMedia fake whose promises are settled manually by the test — makes
+ * teardown-during-acquisition races deterministic.
+ */
+export function makeDeferredMediaDevices(): {
+  mediaDevices: MediaDevices & { getUserMedia: ReturnType<typeof vi.fn> };
+  /** getUserMedia calls not yet settled. */
+  pendingCount(): number;
+  /** Settles the oldest pending call and lets the awaiting code run. */
+  resolveNext(stream: MediaStream): Promise<void>;
+  rejectNext(error: unknown): Promise<void>;
+} {
+  const pending: Array<{ resolve: (s: MediaStream) => void; reject: (e: unknown) => void }> = [];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const mediaDevices = {
+    getUserMedia: vi.fn(
+      () => new Promise<MediaStream>((resolve, reject) => pending.push({ resolve, reject })),
+    ),
+    enumerateDevices: vi.fn(async () => []),
+  } as unknown as MediaDevices & { getUserMedia: ReturnType<typeof vi.fn> };
+  return {
+    mediaDevices,
+    pendingCount: () => pending.length,
+    async resolveNext(stream: MediaStream): Promise<void> {
+      pending.shift()!.resolve(stream);
+      await settle();
+    },
+    async rejectNext(error: unknown): Promise<void> {
+      pending.shift()!.reject(error);
+      await settle();
+    },
+  };
+}
+
 export function makeFakeVideo(): HTMLVideoElement {
   return {
     videoWidth: 640,

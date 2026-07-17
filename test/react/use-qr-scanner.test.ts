@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { useQrScanner } from '../../src/react.js';
 import {
+  makeDeferredMediaDevices,
   makeFakeMediaDevices,
   makeFakeStream,
   makeFakeTrack,
@@ -105,6 +106,65 @@ describe('useQrScanner', () => {
     expect(harness.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
     expect(harness.track.stop).not.toHaveBeenCalled();
     unmount();
+  });
+
+  it('StrictMode-style remount during camera startup leaks no stream', async () => {
+    // mount → unmount → remount with getUserMedia still pending, the exact
+    // sequence React StrictMode produces on every dev mount. The first
+    // mount's stream resolves into an already-destroyed scanner and must be
+    // stopped; the remount's stream is the single live one.
+    const deferred = makeDeferredMediaDevices();
+    const video = makeFakeVideo();
+
+    const harness1 = makeManualInternals({ mediaDevices: deferred.mediaDevices });
+    const first = renderHook(() => useQrScanner({}, harness1.internals));
+    act(() => first.result.current.videoRef(video));
+    expect(deferred.pendingCount()).toBe(1);
+    first.unmount(); // destroy() while getUserMedia is in flight
+
+    const harness2 = makeManualInternals({ mediaDevices: deferred.mediaDevices });
+    const second = renderHook(() => useQrScanner({}, harness2.internals));
+    act(() => second.result.current.videoRef(video));
+    expect(deferred.pendingCount()).toBe(2);
+
+    const trackA = makeFakeTrack();
+    const trackB = makeFakeTrack();
+    await act(() => deferred.resolveNext(makeFakeStream(trackA)));
+    await act(() => deferred.resolveNext(makeFakeStream(trackB)));
+
+    expect(trackA.stop).toHaveBeenCalled(); // orphaned first-mount stream released
+    expect(trackB.stop).not.toHaveBeenCalled();
+    await waitFor(() => expect(second.result.current.isScanning).toBe(true));
+    expect(second.result.current.scanner).not.toBeNull();
+
+    second.unmount();
+    expect(trackB.stop).toHaveBeenCalled(); // and the survivor still tears down
+  });
+
+  it('toggling enabled off during startup releases the pending stream', async () => {
+    const deferred = makeDeferredMediaDevices();
+    const video = makeFakeVideo();
+    const harness = makeManualInternals({ mediaDevices: deferred.mediaDevices });
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useQrScanner({ enabled }, harness.internals),
+      { initialProps: { enabled: true } },
+    );
+
+    act(() => result.current.videoRef(video));
+    rerender({ enabled: false }); // destroy() mid-acquisition
+    const trackA = makeFakeTrack();
+    await act(() => deferred.resolveNext(makeFakeStream(trackA)));
+    expect(trackA.stop).toHaveBeenCalled();
+    expect(result.current.isScanning).toBe(false);
+
+    // Re-enabling reacquires cleanly on a fresh scanner.
+    rerender({ enabled: true });
+    const trackB = makeFakeTrack();
+    await act(() => deferred.resolveNext(makeFakeStream(trackB)));
+    await waitFor(() => expect(result.current.isScanning).toBe(true));
+    expect(trackB.stop).not.toHaveBeenCalled();
+    unmount();
+    expect(trackB.stop).toHaveBeenCalled();
   });
 
   it('surfaces start() failures as error state', async () => {

@@ -119,7 +119,7 @@ await scanner.start();
     <li><code>await start()</code>: asks for permission, attaches the stream, and begins scanning. Rejects with a typed <code>CameraError</code>.</li>
     <li><code>stop()</code>: stops scanning and releases the camera. <code>pause()</code> / <code>resume()</code> keep the stream alive.</li>
     <li><code>destroy()</code>: full teardown (worker, listeners). The instance cannot be reused.</li>
-    <li><code>await setCamera({ facing | deviceId })</code>: hot-switches cameras mid-scan.</li>
+    <li><code>await setCamera({ facing | deviceId })</code>: hot-switches cameras mid-scan. If the new camera can't start, it stops the scanner (emitting <code>stop</code>) and rejects with a <code>CameraError</code>; call <code>start()</code> to recover.</li>
     <li><code>await setTorch(on)</code> / <code>await setZoom(level)</code>: resolve <code>false</code> when unsupported. They never throw.</li>
     <li><code>getCapabilities()</code>: <code>{ torch: boolean, zoom: { min, max, step } | null }</code> for the active track.</li>
     <li><code>update(options)</code>: live-tunes <code>maxScansPerSecond</code>, <code>scanRegion</code>, <code>tryInverted</code>, <code>tryHarder</code>, <code>maxDownscale</code>, <code>dedupeWindowMs</code>, <code>stopOnDecode</code>, <code>multiple</code>, <code>structuredAppend</code> without restarting the camera.</li>
@@ -305,7 +305,8 @@ function Scanner({ open }: { open: boolean }) {
 // enabled: false releases the camera; paused suspends decoding with no
 // black-flash (and lands even if set before startup finishes). `scanner`
 // gives imperative control (torch, setCamera, update). `error` is a
-// CameraError | DecodeError.
+// CameraError | DecodeError. Other options are captured at creation —
+// switch cameras via scanner.setCamera(), not by changing `camera`.
 </pre></div>
   <div class="tab-panel" data-panel="a-vue" hidden><pre class="code" data-lang="ts">
 // &lt;script setup&gt;
