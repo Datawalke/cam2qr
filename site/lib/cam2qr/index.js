@@ -1,5 +1,5 @@
-export { CameraError, QrScanner, listCameras } from './chunk-MYLBZOJV.js';
-export { BitMatrix, DecodeError, decode, decodeAll, decodeMatrix, detect, parseContent } from './chunk-VQB7DEOH.js';
+export { CameraError, QrScanner, listCameras } from './chunk-WVHCQIVG.js';
+export { BitMatrix, DecodeError, decode, decodeAll, decodeMatrix, detect, parseContent } from './chunk-FFVNZWKB.js';
 
 // src/scanner/coords.ts
 function videoToElementCoordinates(points, video) {

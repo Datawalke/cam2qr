@@ -13,8 +13,12 @@ import {
   unref,
   watch,
 } from 'vue';
-import type { CameraError } from './camera/errors.js';
-import { QrScanner, type QrScannerOptions, type ScannerInternals } from './scanner/scanner.js';
+import {
+  QrScanner,
+  type QrScannerOptions,
+  type ScannerError,
+  type ScannerInternals,
+} from './scanner/scanner.js';
 import type { QrResult } from './types.js';
 
 export interface UseQrScannerOptions extends QrScannerOptions {
@@ -23,6 +27,13 @@ export interface UseQrScannerOptions extends QrScannerOptions {
    * Pass a Ref to toggle reactively.
    */
   enabled?: boolean | Ref<boolean>;
+  /**
+   * Suspend/resume decoding while keeping the camera stream warm (distinct
+   * from `enabled`, which releases it — no black-flash or permission churn).
+   * Pass a Ref to toggle reactively. `true` from the start comes up suspended,
+   * even through the async camera-startup window.
+   */
+  paused?: boolean | Ref<boolean>;
 }
 
 export interface UseQrScannerReturn {
@@ -31,7 +42,7 @@ export interface UseQrScannerReturn {
   /** Latest decoded result. */
   result: ShallowRef<QrResult | null>;
   /** Latest camera/decode error, including start() failures. */
-  error: ShallowRef<CameraError | null>;
+  error: ShallowRef<ScannerError | null>;
   /** True between the scanner's start and stop events. */
   isScanning: ShallowRef<boolean>;
   /** The underlying scanner for imperative control (torch, setCamera, …). */
@@ -41,9 +52,10 @@ export interface UseQrScannerReturn {
 /**
  * Starts scanning as soon as a video element is bound (and `enabled` is not
  * false); stops and releases the camera when the scope is disposed or when
- * disabled. Non-`enabled` option changes do not restart the camera — they
- * are captured at scanner creation; use `scanner.value.update()` for live
- * tuning.
+ * disabled. Toggling `paused` suspends/resumes decoding without touching the
+ * camera. Option changes other than `enabled`/`paused` do not restart the
+ * camera — they are captured at scanner creation; use `scanner.value.update()`
+ * for live tuning.
  */
 export function useQrScanner(
   options: UseQrScannerOptions = {},
@@ -51,10 +63,11 @@ export function useQrScanner(
 ): UseQrScannerReturn {
   const videoRef = shallowRef<HTMLVideoElement | null>(null);
   const result = shallowRef<QrResult | null>(null);
-  const error = shallowRef<CameraError | null>(null);
+  const error = shallowRef<ScannerError | null>(null);
   const isScanning = shallowRef(false);
   const scanner = shallowRef<QrScanner | null>(null);
   const enabled = computed(() => unref(options.enabled) !== false);
+  const paused = computed(() => unref(options.paused) === true);
 
   let instance: QrScanner | null = null;
   const teardown = (): void => {
@@ -91,12 +104,21 @@ export function useQrScanner(
         isScanning.value = false;
       });
       scanner.value = instance;
-      instance.start().catch((startError: CameraError) => {
+      instance.start().catch((startError: ScannerError) => {
         error.value = startError;
       });
+      // Honor an initial paused intent; QrScanner remembers a pause requested
+      // during the async 'starting' window and applies it once scanning begins.
+      if (paused.value) instance.pause();
     },
     { immediate: true },
   );
+  // Reactive pause/resume on the live scanner — keeps the stream warm.
+  watch(paused, (isPaused) => {
+    if (!instance) return;
+    if (isPaused) instance.pause();
+    else instance.resume();
+  });
   if (getCurrentScope()) onScopeDispose(teardown);
 
   return { videoRef, result, error, isScanning, scanner };

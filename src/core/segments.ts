@@ -188,7 +188,16 @@ export interface DecodedStream {
   fnc1?: Fnc1;
 }
 
-const textEncoder = new TextEncoder();
+/**
+ * Lazily instantiated so merely importing the library never touches the
+ * `TextEncoder` global (absent in some jsdom/SSR/edge/RN environments). Only a
+ * decode that hits a numeric or alphanumeric segment needs it.
+ */
+let textEncoder: TextEncoder | undefined;
+function encodeUtf8(text: string): Uint8Array {
+  textEncoder ??= new TextEncoder();
+  return textEncoder.encode(text);
+}
 
 /** Decodes the mode-segmented data bitstream (§8.4) into text and segments. */
 export function decodeSegments(data: Uint8Array, version: number): DecodedStream {
@@ -210,7 +219,7 @@ export function decodeSegments(data: Uint8Array, version: number): DecodedStream
         const decoded = decodeNumeric(reader, count);
         segments.push({ mode: 'numeric', text: decoded });
         text += decoded;
-        byteChunks.push(textEncoder.encode(decoded));
+        byteChunks.push(encodeUtf8(decoded));
         break;
       }
       case MODE_ALPHANUMERIC: {
@@ -219,7 +228,7 @@ export function decodeSegments(data: Uint8Array, version: number): DecodedStream
         if (fnc1 !== undefined) decoded = applyFnc1Escapes(decoded);
         segments.push({ mode: 'alphanumeric', text: decoded });
         text += decoded;
-        byteChunks.push(textEncoder.encode(decoded));
+        byteChunks.push(encodeUtf8(decoded));
         break;
       }
       case MODE_BYTE: {

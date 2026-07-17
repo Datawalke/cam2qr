@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { effectScope, shallowRef } from 'vue';
+import { effectScope, nextTick, shallowRef } from 'vue';
+import { DecodeError } from '../../src/errors.js';
 import { useQrScanner } from '../../src/vue.js';
 import {
   makeFakeMediaDevices,
@@ -19,7 +20,28 @@ function makeHarness(payload: string) {
     margin: 4,
   });
   const harness = makeManualInternals({ frame: () => frame, mediaDevices });
-  return { ...harness, track, video: makeFakeVideo() };
+  return { ...harness, track, mediaDevices, video: makeFakeVideo() };
+}
+
+/** A harness whose decode runner always throws — a decode/worker fault. */
+function makeFailingRunnerHarness() {
+  const track = makeFakeTrack({});
+  const mediaDevices = makeFakeMediaDevices(makeFakeStream(track));
+  const frame = renderMatrix(generate('anything', { version: 2, level: 'M' }).matrix, {
+    scale: 6,
+    margin: 4,
+  });
+  const harness = makeManualInternals({
+    frame: () => frame,
+    mediaDevices,
+    createRunner: () => ({
+      scan: async () => {
+        throw new Error('decode worker crashed');
+      },
+      destroy() {},
+    }),
+  });
+  return { ...harness, track, mediaDevices, video: makeFakeVideo() };
 }
 
 describe('useQrScanner (vue)', () => {
@@ -57,6 +79,65 @@ describe('useQrScanner (vue)', () => {
     enabled.value = false;
     await vi.waitFor(() => expect(api.isScanning.value).toBe(false));
     expect(harness.track.stop).toHaveBeenCalled();
+    scope.stop();
+  });
+
+  it('paused ref starts suspended and resumes on the same camera', async () => {
+    const harness = makeHarness('vue suspended');
+    const paused = shallowRef(true);
+    const scope = effectScope();
+    const api = scope.run(() => useQrScanner({ paused }, harness.internals))!;
+
+    api.videoRef.value = harness.video;
+    // The stream comes up but decoding is suspended: no loop, no result.
+    await vi.waitFor(() => expect(api.isScanning.value).toBe(true));
+    expect(harness.loop.pendingTicks()).toBe(0);
+    await harness.loop.runTick();
+    expect(api.result.value).toBeNull();
+
+    // Resuming decodes without re-requesting the camera. nextTick() lets the
+    // reactive watcher flush (Vue watchers run on the microtask queue) so
+    // resume() has scheduled the next tick before we run it.
+    paused.value = false;
+    await nextTick();
+    await harness.loop.runTick();
+    await vi.waitFor(() => expect(api.result.value?.text).toBe('vue suspended'));
+    expect(harness.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    scope.stop();
+  });
+
+  it('toggling paused keeps the stream warm (no track.stop, no re-request)', async () => {
+    const harness = makeHarness('vue warm');
+    const paused = shallowRef(false);
+    const scope = effectScope();
+    const api = scope.run(() => useQrScanner({ paused }, harness.internals))!;
+
+    api.videoRef.value = harness.video;
+    await vi.waitFor(() => expect(api.isScanning.value).toBe(true));
+    await harness.loop.runTick();
+    await vi.waitFor(() => expect(api.result.value?.text).toBe('vue warm'));
+
+    paused.value = true;
+    await vi.waitFor(() => expect(harness.loop.pendingTicks()).toBe(0));
+    expect(harness.track.stop).not.toHaveBeenCalled();
+
+    paused.value = false;
+    await harness.loop.runTick();
+    expect(harness.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(harness.track.stop).not.toHaveBeenCalled();
+    scope.stop();
+  });
+
+  it('surfaces decode-runner faults as DecodeError via the error store', async () => {
+    const harness = makeFailingRunnerHarness();
+    const scope = effectScope();
+    const api = scope.run(() => useQrScanner({}, harness.internals))!;
+    api.videoRef.value = harness.video;
+    await vi.waitFor(() => expect(api.isScanning.value).toBe(true));
+
+    await harness.loop.runTick();
+    await vi.waitFor(() => expect(api.error.value).toBeInstanceOf(DecodeError));
+    expect((api.error.value as DecodeError).code).toBe('runner-failed');
     scope.stop();
   });
 

@@ -1,4 +1,4 @@
-import { parseContent, scanFrame } from './chunk-VQB7DEOH.js';
+import { DecodeError, parseContent, scanFrame } from './chunk-FFVNZWKB.js';
 
 // src/camera/errors.ts
 var CameraError = class _CameraError extends Error {
@@ -259,8 +259,11 @@ function createDecodeRunner(useWorker, useNativeDetector = false) {
 function createEngineRunner(useWorker) {
   if (useWorker) {
     const worker = tryCreateWorker();
-    if (worker) return createWorkerRunner(worker);
+    if (worker) return createWorkerRunner(worker, createInlineRunner);
   }
+  return createInlineRunner();
+}
+function createInlineRunner() {
   return {
     scan: (image, options) => Promise.resolve(scanFrame(image, options)),
     destroy() {
@@ -275,9 +278,10 @@ function tryCreateWorker() {
     return null;
   }
 }
-function createWorkerRunner(worker) {
+function createWorkerRunner(worker, fallback) {
   let nextId = 0;
   const pending = /* @__PURE__ */ new Map();
+  let inline = null;
   worker.onmessage = (event) => {
     const { id, results, detections, error } = event.data;
     const entry = pending.get(id);
@@ -287,23 +291,30 @@ function createWorkerRunner(worker) {
     else entry.resolve({ results: results ?? [], detections: detections ?? [] });
   };
   worker.onerror = () => {
-    const entries = [...pending.values()];
+    if (inline) return;
+    inline = fallback();
+    worker.terminate();
+    const inflight = [...pending.values()];
     pending.clear();
-    for (const entry of entries) entry.reject(new Error("decode worker crashed"));
+    for (const entry of inflight) {
+      inline.scan(entry.image, entry.options).then(entry.resolve, entry.reject);
+    }
   };
   return {
     scan(image, options) {
+      if (inline) return inline.scan(image, options);
       const id = nextId++;
       const buffer = new Uint8ClampedArray(image.data).buffer;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        pending.set(id, { image, options, resolve, reject });
         worker.postMessage({ id, buffer, width: image.width, height: image.height, options }, [
           buffer
         ]);
       });
     },
     destroy() {
-      worker.terminate();
+      if (!inline) worker.terminate();
+      inline?.destroy();
       pending.clear();
     }
   };
@@ -389,6 +400,8 @@ var QrScanner = class {
     this.lastDecodeAt = Number.NEGATIVE_INFINITY;
     this.decoding = false;
     this.hiddenPause = false;
+    /** A pause requested during the async 'starting' window, honored at start. */
+    this.pendingPause = false;
     this.onVisibilityChange = () => {
       if (!this.options.pauseOnHidden || typeof document === "undefined") return;
       if (document.visibilityState === "hidden") {
@@ -458,6 +471,11 @@ var QrScanner = class {
     this.deduper.reset();
     this.assembler.reset();
     this.emit("start", void 0);
+    if (this.pendingPause) {
+      this.pendingPause = false;
+      this.pause();
+      return;
+    }
     this.scheduleNext();
   }
   /** Stops scanning and releases the camera. */
@@ -473,12 +491,20 @@ var QrScanner = class {
   }
   /** Suspends decoding but keeps the camera stream alive. */
   pause() {
+    if (this.state === "starting") {
+      this.pendingPause = true;
+      return;
+    }
     if (this.state !== "scanning") return;
     this.cancelLoop();
     this.state = "paused";
   }
   /** Resumes decoding after pause(). */
   resume() {
+    if (this.state === "starting") {
+      this.pendingPause = false;
+      return;
+    }
     if (this.state !== "paused") return;
     this.state = "scanning";
     this.scheduleNext();
@@ -633,7 +659,7 @@ var QrScanner = class {
         }
       }
     } catch (error) {
-      this.emit("error", CameraError.from(error));
+      this.emit("error", DecodeError.from(error));
     } finally {
       this.decoding = false;
     }
@@ -660,5 +686,5 @@ function defaultSchedule(video, callback) {
 }
 
 export { CameraError, QrScanner, listCameras };
-//# sourceMappingURL=chunk-MYLBZOJV.js.map
-//# sourceMappingURL=chunk-MYLBZOJV.js.map
+//# sourceMappingURL=chunk-WVHCQIVG.js.map
+//# sourceMappingURL=chunk-WVHCQIVG.js.map

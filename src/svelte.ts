@@ -5,9 +5,24 @@
  * point is only bundled when imported.
  */
 import { type Readable, writable } from 'svelte/store';
-import type { CameraError } from './camera/errors.js';
-import { QrScanner, type QrScannerOptions, type ScannerInternals } from './scanner/scanner.js';
+import {
+  QrScanner,
+  type QrScannerOptions,
+  type ScannerError,
+  type ScannerInternals,
+} from './scanner/scanner.js';
 import type { QrResult } from './types.js';
+
+export interface CreateQrScannerOptions extends QrScannerOptions {
+  /**
+   * Suspend/resume decoding while keeping the camera stream warm — distinct
+   * from unmounting the `<video>`, which releases the camera (no black-flash
+   * or permission churn). Pass a boolean, or a store to toggle reactively; a
+   * `true` value comes up suspended even through the async camera-startup
+   * window.
+   */
+  paused?: boolean | Readable<boolean>;
+}
 
 export interface QrScannerStores {
   /**
@@ -18,7 +33,7 @@ export interface QrScannerStores {
   /** Latest decoded result. */
   result: Readable<QrResult | null>;
   /** Latest camera/decode error, including start() failures. */
-  error: Readable<CameraError | null>;
+  error: Readable<ScannerError | null>;
   /** True between the scanner's start and stop events. */
   isScanning: Readable<boolean>;
   /** The underlying scanner while a video is mounted, else null. */
@@ -36,11 +51,11 @@ export interface QrScannerStores {
  * ```
  */
 export function createQrScanner(
-  options: QrScannerOptions = {},
+  options: CreateQrScannerOptions = {},
   internals?: ScannerInternals,
 ): QrScannerStores {
   const result = writable<QrResult | null>(null);
-  const error = writable<CameraError | null>(null);
+  const error = writable<ScannerError | null>(null);
   const isScanning = writable(false);
   const scanner = writable<QrScanner | null>(null);
 
@@ -68,9 +83,17 @@ export function createQrScanner(
       instance.on('start', () => isScanning.set(true));
       instance.on('stop', () => isScanning.set(false));
       scanner.set(instance);
-      instance.start().catch((startError: CameraError) => error.set(startError));
+      instance.start().catch((startError: ScannerError) => error.set(startError));
+      // Suspend/resume without releasing the camera. A store toggles reactively
+      // (its immediate subscription fires now); QrScanner remembers a pause
+      // requested during the async 'starting' window and honors it at start.
+      const unsubscribePaused = subscribePaused(options.paused, (isPaused) => {
+        if (isPaused) instance.pause();
+        else instance.resume();
+      });
       return {
         destroy(): void {
+          unsubscribePaused?.();
           instance.destroy();
           scanner.set(null);
           isScanning.set(false);
@@ -78,4 +101,23 @@ export function createQrScanner(
       };
     },
   };
+}
+
+/**
+ * Applies a `paused` intent that may be a static boolean or a reactive store.
+ * A store subscription runs its callback immediately with the current value,
+ * then on every change; returns an unsubscribe for stores, or undefined for a
+ * static boolean (which is applied once, right away).
+ */
+function subscribePaused(
+  paused: boolean | Readable<boolean> | undefined,
+  apply: (isPaused: boolean) => void,
+): (() => void) | undefined {
+  if (isReadable(paused)) return paused.subscribe((value) => apply(value === true));
+  if (paused === true) apply(true);
+  return undefined;
+}
+
+function isReadable(value: unknown): value is Readable<boolean> {
+  return typeof (value as { subscribe?: unknown } | null)?.subscribe === 'function';
 }

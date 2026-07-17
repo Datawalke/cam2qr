@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { CameraError } from '../../src/camera/errors.js';
 import { decode } from '../../src/decode.js';
+import { DecodeError } from '../../src/errors.js';
 import { QrScanner } from '../../src/scanner/scanner.js';
 import type { Detection, ImageDataLike, QrResult } from '../../src/types.js';
 import {
@@ -319,6 +321,54 @@ describe('QrScanner', () => {
     clock.advance(1000);
     await loop.runTick();
     expect(decoded).toEqual(['pausable']);
+    scanner.destroy();
+  });
+
+  it('honors a pause() requested during the async starting window', async () => {
+    const decoded: string[] = [];
+    const { scanner, track, loop, clock } = makeScanner({
+      frames: () => qrFrame('suspended start'),
+      scannerOptions: { onDecode: (r) => decoded.push(r.text) },
+    });
+
+    // Pause while start() is mid-flight (state 'starting'): it must land, not
+    // silently no-op, so the scanner comes up suspended.
+    const starting = scanner.start();
+    scanner.pause();
+    await starting;
+
+    expect(track.stop).not.toHaveBeenCalled(); // stream kept warm
+    expect(loop.pendingTicks()).toBe(0); // no scan loop scheduled
+    await loop.runTick();
+    expect(decoded).toHaveLength(0);
+
+    // Resuming continues without re-requesting the camera.
+    scanner.resume();
+    clock.advance(1000);
+    await loop.runTick();
+    expect(decoded).toEqual(['suspended start']);
+    scanner.destroy();
+  });
+
+  it('surfaces decode-runner faults as DecodeError, not CameraError', async () => {
+    const errors: Array<CameraError | DecodeError> = [];
+    const { scanner, loop } = makeScanner({
+      frames: () => qrFrame('boom'),
+      createRunner: () => ({
+        scan: async () => {
+          throw new Error('decode worker crashed');
+        },
+        destroy() {},
+      }),
+      scannerOptions: { onError: (e) => errors.push(e) },
+    });
+    await scanner.start();
+    await loop.runTick();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(DecodeError);
+    expect(errors[0]).not.toBeInstanceOf(CameraError);
+    expect((errors[0] as DecodeError).code).toBe('runner-failed');
     scanner.destroy();
   });
 
